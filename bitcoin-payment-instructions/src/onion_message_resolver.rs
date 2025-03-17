@@ -1,0 +1,100 @@
+use std::boxed::Box;
+use std::vec::Vec;
+use std::ops::Deref;
+use std::sync::Mutex;
+
+use lightning::blinded_path::message::DNSResolverContext;
+use lightning::ln::channelmanager::PaymentId;
+use lightning::onion_message::dns_resolution::{DNSResolverMessage, DNSResolverMessageHandler, DNSSECQuery, DNSSECProof, HumanReadableName, OMNameResolver};
+use lightning::onion_message::messenger::{Destination, ResponseInstruction, Responder, MessageSendInstructions};
+use lightning::util::logger::Logger;
+use lightning::sign::EntropySource;
+use lightning::routing::gossip::NetworkGraph;
+
+use crate::{HrnResolutionFuture, HrnResolver, HrnResolution};
+
+struct OsRng;
+impl EntropySource for OsRng {
+	fn get_secure_random_bytes(&self) -> [u8; 32] {
+		let mut res = [0; 32];
+		getrandom::fill(&mut res);
+		res
+	}
+}
+
+pub struct LDKOnionMessageDNSSECHrnResolver<N: Deref<Target = NetworkGraph<L>>, L: Deref> where L::Target: Logger {
+	network_graph: N,
+	resolver: OMNameResolver,
+	message_queue: Mutex<Vec<(DNSResolverMessage, MessageSendInstructions)>>,
+}
+
+struct ResolutionFuture<'a, N: Deref<Target = NetworkGraph<L>>, L: Deref> where L::Target: Logger {
+	resolver: &'a LDKOnionMessageDNSSECHrnResolver<N, L>,
+}
+
+impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> LDKOnionMessageDNSSECHrnResolver<N, L> where L::Target: Logger {
+	async fn resolve_hrn(&self, hrn: &HumanReadableName) -> Result<HrnResolution, &'static str> {
+		let mut dns_resolvers = Vec::new();
+		for (node_id, node) in self.network_graph.read_only().nodes().unordered_iter() {
+			if let Some(info) = &node.announcement_info {
+				// Sadly, 31 nodes currently squat on the DNS Resolver feature bit
+				// without speaking it.
+				// Its unclear why they're doing so, but none of them currently
+				// also have the onion messaging feature bit set, so here we check
+				// for both.
+				let supports_dns = info.features().supports_dns_resolution();
+				let supports_om = info.features().supports_onion_messages();
+				if supports_dns && supports_om {
+					if let Ok(pubkey) = node_id.as_pubkey() {
+						dns_resolvers.push(Destination::Node(pubkey));
+					}
+				}
+			}
+			if dns_resolvers.len() > 5 {
+				break;
+			}
+		}
+		if dns_resolvers.is_empty() {
+			return Err("Failed to find any DNS resolving nodes, check your network graph is synced");
+		}
+		let mut payment_id = PaymentId([0; 32]);
+		OsRng.get_secure_random_bytes(&mut payment_id.0);
+		let err = "The provided HRN did not fit in a DNS request";
+		let query = self.resolver.resolve_name(payment_id, hrn.clone(), &OsRng).map_err(|_| err)?;
+		let queue = self.message_queue.lock().unwrap();
+		for destination in dns_resolver {
+			queue.push((query.clone(), // XXX: need reply path to us here
+                                       // (https://github.com/lightningdevkit/rust-lightning/issues/3669)
+		}
+		// XXX: now we need to someone build a future that lets us store the polling context in
+		// LDKOnionMessageDNSSECHrnResolver, then once we get the response in handle_dnssec_proof
+		// we should wake that context and return the result!
+	}
+}
+
+impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> DNSResolverMessageHandler for LDKOnionMessageDNSSECHrnResolver<N, L> where L::Target: Logger {
+	fn handle_dnssec_query(
+		&self, _: DNSSECQuery, _: Option<Responder>,
+	) -> Option<(DNSResolverMessage, ResponseInstruction)> { None }
+
+	fn handle_dnssec_proof(&self, msg: DNSSECProof, context: DNSResolverContext) {
+		let results = self.resolver.handle_dnssec_proof_for_uri(msg, context);
+		if let Some((resolved, res)) = results {
+			for resolved in resolved {
+				// XXX: wake context
+			}
+		}
+	}
+
+	fn release_pending_messages(&self) -> Vec<(DNSResolverMessage, MessageSendInstructions)> {
+		std::mem::take(&mut self.message_queue.lock().unwrap())
+	}
+}
+
+impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> HrnResolver for LDKOnionMessageDNSSECHrnResolver<N, L> where L::Target: Logger {
+	fn resolve_hrn<'a>(&'a self, hrn: &'a HumanReadableName) -> HrnResolutionFuture<'a> {
+		Box::pin(async move {
+			self.resolve_hrn(hrn).await
+		})
+	}
+}
