@@ -13,6 +13,9 @@
 //! This crate doesn't actually help you *pay* these instructions, but provides a unified way to
 //! parse them.
 
+// TODO: We should also be able to parse refund instructions, either ln-address ones or bolt 12
+// refunds or on-chain private key for sweep
+
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
@@ -169,6 +172,7 @@ pub enum ParseError {
 	UnknownRequiredParameter,
 	/// The call to [`HrnResolver::resolve_hrn`] failed with the contained error.
 	HrnResolutionError(&'static str),
+// TODO: expiry and check it for ln stuff!
 }
 
 impl PaymentInstructions {
@@ -189,6 +193,43 @@ impl PaymentInstructions {
 			}
 		}
 		max_amt_msat.map(|amt| Amount(amt))
+	}
+
+	/// The amount which the payment instruction requires payment for when paid over lightning.
+	///
+	/// We require that all lightning payment methods in payment instructions require an identical
+	/// amount for payment, and thus if this method returns `None` it indicates either:
+	///  * no lightning payment instructions exist,
+	///  * there is no required amount and any amount can be paid
+	///  * the only lightning payment instructions are for a BOLT 12 offer denominated in a
+	///    non-Bitcoin currency.
+	pub fn ln_payment_amount(&self) -> Option<Amount> {
+		for method in self.methods() {
+			match method {
+				PaymentMethod::LightningBolt11(_)|PaymentMethod::LightningBolt12(_) => {
+					return method.amount();
+				}
+				PaymentMethod::OnChain { .. } => {},
+			}
+		}
+		None
+	}
+
+	/// The amount which the payment instruction requires payment for when paid on-chain.
+	///
+	/// There is no way to encode different payment amounts for multiple on-chain formats
+	/// currently, and as such all on-chain [`PaymentMethod`]s will contain the same
+	/// [`PaymentMethod::amount`].
+	pub fn onchain_payment_amount(&self) -> Option<Amount> {
+		for method in self.methods() {
+			match method {
+				PaymentMethod::LightningBolt11(_)|PaymentMethod::LightningBolt12(_) => {}
+				PaymentMethod::OnChain { .. } => {
+					return method.amount();
+				},
+			}
+		}
+		None
 	}
 
 	/// The list of [`PaymentMethod`]s.
@@ -431,6 +472,7 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 			const MAX_MSATS: u64 = 21_000_000_0000_0000_000;
 			let mut min_amt_msat = MAX_MSATS;
 			let mut max_amt_msat = 0;
+			let mut ln_amt_msat = None;
 			let mut have_amountless_method = false;
 			for method in methods.iter() {
 				if let Some(amt_msat) = method.amount().map(|amt| amt.msats()) {
@@ -443,6 +485,18 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 					}
 					if amt_msat > max_amt_msat {
 						max_amt_msat = amt_msat;
+					}
+					match method {
+						PaymentMethod::LightningBolt11(_)|PaymentMethod::LightningBolt12(_) => {
+							if let Some(ln_amt_msat) = ln_amt_msat {
+								if ln_amt_msat != amt_msat {
+									let err = "Had multiple different amounts in lightning payment methods in a BIP 321 bitcoin: URI";
+									return Err(ParseError::InconsistentInstructions(err));
+								}
+							}
+							ln_amt_msat = Some(amt_msat);
+						}
+						PaymentMethod::OnChain { .. } => {}
 					}
 				} else {
 					have_amountless_method = true;
