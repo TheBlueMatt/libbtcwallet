@@ -1,3 +1,6 @@
+//! A [`HrnResolver`] which uses lightning onion messages and DNSSEC proofs to request DNS
+//! resolution directly from untrusted lightning nodes, providing privacy through onion routing.
+
 use std::boxed::Box;
 use std::vec::Vec;
 use std::ops::Deref;
@@ -17,19 +20,17 @@ struct OsRng;
 impl EntropySource for OsRng {
 	fn get_secure_random_bytes(&self) -> [u8; 32] {
 		let mut res = [0; 32];
-		getrandom::fill(&mut res);
+		getrandom::fill(&mut res).expect("Fetching system randomness should always succeed");
 		res
 	}
 }
 
+/// A [`HrnResolver`] which uses lightning onion messages and DNSSEC proofs to request DNS
+/// resolution directly from untrusted lightning nodes, providing privacy through onion routing.
 pub struct LDKOnionMessageDNSSECHrnResolver<N: Deref<Target = NetworkGraph<L>>, L: Deref> where L::Target: Logger {
 	network_graph: N,
 	resolver: OMNameResolver,
 	message_queue: Mutex<Vec<(DNSResolverMessage, MessageSendInstructions)>>,
-}
-
-struct ResolutionFuture<'a, N: Deref<Target = NetworkGraph<L>>, L: Deref> where L::Target: Logger {
-	resolver: &'a LDKOnionMessageDNSSECHrnResolver<N, L>,
 }
 
 impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> LDKOnionMessageDNSSECHrnResolver<N, L> where L::Target: Logger {
@@ -57,18 +58,21 @@ impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> LDKOnionMessageDNSSECHrnResol
 		if dns_resolvers.is_empty() {
 			return Err("Failed to find any DNS resolving nodes, check your network graph is synced");
 		}
-		let mut payment_id = PaymentId([0; 32]);
-		OsRng.get_secure_random_bytes(&mut payment_id.0);
+		let payment_id = PaymentId(OsRng.get_secure_random_bytes());
 		let err = "The provided HRN did not fit in a DNS request";
-		let query = self.resolver.resolve_name(payment_id, hrn.clone(), &OsRng).map_err(|_| err)?;
-		let queue = self.message_queue.lock().unwrap();
-		for destination in dns_resolver {
-			queue.push((query.clone(), // XXX: need reply path to us here
-                                       // (https://github.com/lightningdevkit/rust-lightning/issues/3669)
+		let (query, _context) = self.resolver.resolve_name(payment_id, hrn.clone(), &OsRng).map_err(|_| err)?;
+		// XXX: need reply path to us here (https://github.com/lightningdevkit/rust-lightning/issues/3669)
+		// let reply_path = new_reply_path(context)
+
+		let mut queue = self.message_queue.lock().unwrap();
+		for destination in dns_resolvers {
+			let instructions = MessageSendInstructions::WithoutReplyPath { destination };
+			queue.push((DNSResolverMessage::DNSSECQuery(query.clone()), instructions));
 		}
 		// XXX: now we need to someone build a future that lets us store the polling context in
 		// LDKOnionMessageDNSSECHrnResolver, then once we get the response in handle_dnssec_proof
 		// we should wake that context and return the result!
+		Err("unimplemented!")
 	}
 }
 
@@ -79,8 +83,8 @@ impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> DNSResolverMessageHandler for
 
 	fn handle_dnssec_proof(&self, msg: DNSSECProof, context: DNSResolverContext) {
 		let results = self.resolver.handle_dnssec_proof_for_uri(msg, context);
-		if let Some((resolved, res)) = results {
-			for resolved in resolved {
+		if let Some((resolved, _res)) = results {
+			for _resolved in resolved {
 				// XXX: wake context
 			}
 		}
@@ -91,7 +95,7 @@ impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> DNSResolverMessageHandler for
 	}
 }
 
-impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> HrnResolver for LDKOnionMessageDNSSECHrnResolver<N, L> where L::Target: Logger {
+impl<N: Deref<Target = NetworkGraph<L>> + Sync, L: Deref> HrnResolver for LDKOnionMessageDNSSECHrnResolver<N, L> where L::Target: Logger {
 	fn resolve_hrn<'a>(&'a self, hrn: &'a HumanReadableName) -> HrnResolutionFuture<'a> {
 		Box::pin(async move {
 			self.resolve_hrn(hrn).await

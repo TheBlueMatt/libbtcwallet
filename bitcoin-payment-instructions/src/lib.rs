@@ -45,8 +45,8 @@ use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescriptionRef, ParseOrSeman
 
 pub use lightning::onion_message::dns_resolution::HumanReadableName;
 
-/*#[cfg(feature = "std")]
-pub mod onion_message_resolver;*/ // XXX: finish this
+#[cfg(feature = "std")]
+pub mod onion_message_resolver;
 
 #[cfg(feature = "http")]
 pub mod http_resolver;
@@ -57,7 +57,8 @@ pub mod http_resolver;
 /// type.
 ///
 /// In general, when displaying amounts to the user, you should use [`Self::sats_rounded_up`].
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+// TODO: Move this into lightning-types
 pub struct Amount(u64);
 
 impl core::fmt::Debug for Amount {
@@ -68,10 +69,10 @@ impl core::fmt::Debug for Amount {
 
 impl Amount {
 	/// The amount in milli-satoshis
-	pub fn msats(&self) -> u64 { self.0 }
+	pub const fn msats(&self) -> u64 { self.0 }
 
 	/// The amount in satoshis, if it is exactly a whole number of sats.
-	pub fn sats(&self) -> Result<u64, ()> {
+	pub const fn sats(&self) -> Result<u64, ()> {
 		if self.0 % 1000 == 0 {
 			Ok(self.0 / 1000)
 		} else {
@@ -80,8 +81,18 @@ impl Amount {
 	}
 
 	/// The amount in satoshis, rounded up
-	pub fn sats_rounded_up(&self) -> u64 {
+	pub const fn sats_rounded_up(&self) -> u64 {
 		(self.0 + 999) / 1000
+	}
+
+	/// Constructs a new [`Amount`] for the given number of milli-satoshis.
+	pub const fn from_milli_sats(msats: u64) -> Self {
+		Amount(msats)
+	}
+
+	/// Constructs a new [`Amount`] for the given number of satoshis.
+	pub const fn from_sats(sats: u64) -> Self {
+		Amount(sats * 1000)
 	}
 }
 
@@ -601,11 +612,15 @@ pub type HrnResolutionFuture<'a> = Pin<Box<dyn Future<Output = Result<HrnResolut
 /// back to LN-Address to resolve to a Lightning BOLT 11 using HTTP.
 ///
 /// A resolver which uses onion messages over the lightning network for LDK users is provided in
-/// [`onion_message_resolver::LDKOnionMessageDNSSECHrnResolver`] if this crate is built with the
-/// `std` feature.
+#[cfg_attr(feature = "std", doc = "[`onion_message_resolver::LDKOnionMessageDNSSECHrnResolver`]")]
+#[cfg_attr(not(feature = "std"), doc = "`onion_message_resolver::LDKOnionMessageDNSSECHrnResolver`")]
+/// if this crate is built with the `std` feature.
 ///
 /// A resolver which uses HTTPS to `dns.google` and HTTPS to arbitrary servers for LN-Address is
-/// provided in [`http_resolver::HTTPResolver`] if this crate is built with the `http` feature.
+/// provided in
+#[cfg_attr(feature = "http", doc = "[`http_resolver::HTTPHrnResolver`]")]
+#[cfg_attr(not(feature = "http"), doc = "`http_resolver::HTTPHrnResolver`")]
+/// if this crate is built with the `http` feature.
 pub trait HrnResolver {
 	/// Resolves the given Human Readable Name into a [`HrnResolution`] containing a result which
 	/// can be further parsed as payment instructions.
