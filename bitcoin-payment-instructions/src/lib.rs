@@ -18,27 +18,24 @@
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
-
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::private_intra_doc_links)]
-
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate core;
 extern crate alloc;
+extern crate core;
 
-use alloc::vec;
-use alloc::boxed::Box;
 use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
 use alloc::str::FromStr;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use core::future::Future;
 use core::pin::Pin;
 
-use bitcoin::{Address, Network};
-use bitcoin::address;
+use bitcoin::{address, Address, Network};
 use lightning::offers::offer::{self, Offer};
 use lightning::offers::parse::Bolt12ParseError;
 use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescriptionRef, ParseOrSemanticError};
@@ -69,7 +66,9 @@ impl core::fmt::Debug for Amount {
 
 impl Amount {
 	/// The amount in milli-satoshis
-	pub const fn msats(&self) -> u64 { self.0 }
+	pub const fn msats(&self) -> u64 {
+		self.0
+	}
 
 	/// The amount in satoshis, if it is exactly a whole number of sats.
 	pub const fn sats(&self) -> Result<u64, ()> {
@@ -112,7 +111,7 @@ pub enum PaymentMethod {
 		amount: Option<Amount>,
 		/// The address to which payment can be made.
 		address: Address,
-	}
+	},
 }
 
 impl PaymentMethod {
@@ -125,15 +124,14 @@ impl PaymentMethod {
 	/// will be returned. See [`Offer::amount`] and LDK's offer payment logic for more info.
 	pub fn amount(&self) -> Option<Amount> {
 		match self {
-			PaymentMethod::LightningBolt11(invoice) =>
-				invoice.amount_milli_satoshis().map(|a| Amount(a)),
-			PaymentMethod::LightningBolt12(offer) =>  {
-				match offer.amount() {
-					Some(offer::Amount::Bitcoin { amount_msats }) => Some(Amount(amount_msats)),
-					Some(offer::Amount::Currency { .. }) => None,
-					None => None,
-				}
-			}
+			PaymentMethod::LightningBolt11(invoice) => {
+				invoice.amount_milli_satoshis().map(|a| Amount(a))
+			},
+			PaymentMethod::LightningBolt12(offer) => match offer.amount() {
+				Some(offer::Amount::Bitcoin { amount_msats }) => Some(Amount(amount_msats)),
+				Some(offer::Amount::Currency { .. }) => None,
+				None => None,
+			},
 			PaymentMethod::OnChain { amount, .. } => *amount,
 		}
 	}
@@ -183,7 +181,7 @@ pub enum ParseError {
 	UnknownRequiredParameter,
 	/// The call to [`HrnResolver::resolve_hrn`] failed with the contained error.
 	HrnResolutionError(&'static str),
-// TODO: expiry and check it for ln stuff!
+	// TODO: expiry and check it for ln stuff!
 }
 
 impl PaymentInstructions {
@@ -217,9 +215,9 @@ impl PaymentInstructions {
 	pub fn ln_payment_amount(&self) -> Option<Amount> {
 		for method in self.methods() {
 			match method {
-				PaymentMethod::LightningBolt11(_)|PaymentMethod::LightningBolt12(_) => {
+				PaymentMethod::LightningBolt11(_) | PaymentMethod::LightningBolt12(_) => {
 					return method.amount();
-				}
+				},
 				PaymentMethod::OnChain { .. } => {},
 			}
 		}
@@ -234,7 +232,7 @@ impl PaymentInstructions {
 	pub fn onchain_payment_amount(&self) -> Option<Amount> {
 		for method in self.methods() {
 			match method {
-				PaymentMethod::LightningBolt11(_)|PaymentMethod::LightningBolt12(_) => {}
+				PaymentMethod::LightningBolt11(_) | PaymentMethod::LightningBolt12(_) => {},
 				PaymentMethod::OnChain { .. } => {
 					return method.amount();
 				},
@@ -287,15 +285,18 @@ impl PaymentInstructions {
 	}
 }
 
-
-fn instructions_from_bolt11(invoice: Bolt11Invoice, network: Network) -> Result<(Option<String>, impl Iterator<Item=PaymentMethod>), ParseError> {
+fn instructions_from_bolt11(
+	invoice: Bolt11Invoice, network: Network,
+) -> Result<(Option<String>, impl Iterator<Item = PaymentMethod>), ParseError> {
 	if invoice.network() != network {
 		return Err(ParseError::WrongNetwork);
 	}
 	// TODO: Extract fallback address
 	if let Bolt11InvoiceDescriptionRef::Direct(desc) = invoice.description() {
-		Ok((Some(desc.as_inner().0.clone()),
-			Some(PaymentMethod::LightningBolt11(invoice)).into_iter()))
+		Ok((
+			Some(desc.as_inner().0.clone()),
+			Some(PaymentMethod::LightningBolt11(invoice)).into_iter(),
+		))
 	} else {
 		Ok((None, Some(PaymentMethod::LightningBolt11(invoice)).into_iter()))
 	}
@@ -333,19 +334,23 @@ fn test_un_percent_encode() {
 	assert!(un_percent_encode("42%2a").is_err());
 }
 
-fn parse_resolved_payment_instructions(instructions: &str, network: Network, supports_proof_of_payment_callbacks: bool, hrn: Option<HumanReadableName>, hrn_proof: Option<Vec<u8>>) -> Result<PaymentInstructions, ParseError> {
+fn parse_resolved_instructions(
+	instructions: &str, network: Network, supports_proof_of_payment_callbacks: bool,
+	hrn: Option<HumanReadableName>, hrn_proof: Option<Vec<u8>>,
+) -> Result<PaymentInstructions, ParseError> {
 	const BTC_URI_PFX_LEN: usize = "bitcoin:".len();
 	const LN_URI_PFX_LEN: usize = "lightning:".len();
 
-	if instructions.len() >= BTC_URI_PFX_LEN && instructions[..BTC_URI_PFX_LEN].eq_ignore_ascii_case("bitcoin:") {
+	if instructions.len() >= BTC_URI_PFX_LEN
+		&& instructions[..BTC_URI_PFX_LEN].eq_ignore_ascii_case("bitcoin:")
+	{
 		let (body, params) = split_once(&instructions[BTC_URI_PFX_LEN..], '?');
 		let mut methods = Vec::new();
 		let mut recipient_description = None;
 		let mut pop_callback = None;
 		if !body.is_empty() {
 			let addr = Address::from_str(body).map_err(|e| ParseError::InvalidOnChain(e))?;
-			let address =
-				addr.require_network(network).map_err(|_| ParseError::WrongNetwork)?;
+			let address = addr.require_network(network).map_err(|_| ParseError::WrongNetwork)?;
 			methods.push(PaymentMethod::OnChain { amount: None, address });
 		}
 		if let Some(params) = params {
@@ -353,13 +358,16 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 				let (k, v) = split_once(param, '=');
 				if k.eq_ignore_ascii_case("bc") || k.eq_ignore_ascii_case("req-bc") {
 					if let Some(address_string) = v {
-						if address_string.len() < 3 || !address_string[..3].eq_ignore_ascii_case("bc1") {
+						if address_string.len() < 3
+							|| !address_string[..3].eq_ignore_ascii_case("bc1")
+						{
 							// `bc` key-values must only include bech32/bech32m strings with HRP
 							// "bc" (i.e. Segwit addresses).
 							let err = "BIP 321 bitcoin: URI contained a bc instruction which was not a Segwit address (bc1*)";
 							return Err(ParseError::InvalidInstructions(err));
 						}
-						let addr = Address::from_str(address_string).map_err(|e| ParseError::InvalidOnChain(e))?;
+						let addr = Address::from_str(address_string)
+							.map_err(|e| ParseError::InvalidOnChain(e))?;
 						let address =
 							addr.require_network(network).map_err(|_| ParseError::WrongNetwork)?;
 						methods.push(PaymentMethod::OnChain { amount: None, address });
@@ -367,7 +375,9 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 						let err = "BIP 321 bitcoin: URI contained a bc (Segwit address) instruction without a value";
 						return Err(ParseError::InvalidInstructions(err));
 					}
-				} else if k.eq_ignore_ascii_case("lightning") || k.eq_ignore_ascii_case("req-lightning") {
+				} else if k.eq_ignore_ascii_case("lightning")
+					|| k.eq_ignore_ascii_case("req-lightning")
+				{
 					if let Some(invoice_string) = v {
 						let invoice = Bolt11Invoice::from_str(invoice_string)
 							.map_err(|e| ParseError::InvalidBolt11(e))?;
@@ -384,7 +394,8 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 					}
 				} else if k.eq_ignore_ascii_case("lno") || k.eq_ignore_ascii_case("req-lno") {
 					if let Some(offer_string) = v {
-						let offer = Offer::from_str(offer_string).map_err(|e| ParseError::InvalidBolt12(e))?;
+						let offer = Offer::from_str(offer_string)
+							.map_err(|e| ParseError::InvalidBolt12(e))?;
 						if !offer.supports_chain(network.chain_hash()) {
 							return Err(ParseError::WrongNetwork);
 						}
@@ -400,7 +411,8 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 					// We handle this in the second loop below
 				} else if k.eq_ignore_ascii_case("label") || k.eq_ignore_ascii_case("req-label") {
 					// We handle this in the second loop below
-				} else if k.eq_ignore_ascii_case("message") || k.eq_ignore_ascii_case("req-message") {
+				} else if k.eq_ignore_ascii_case("message") || k.eq_ignore_ascii_case("req-message")
+				{
 					// We handle this in the second loop below
 				} else if k.eq_ignore_ascii_case("pop") || k.eq_ignore_ascii_case("req-pop") {
 					if k.eq_ignore_ascii_case("req-pop") && !supports_proof_of_payment_callbacks {
@@ -446,8 +458,9 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 							return Err(ParseError::InvalidInstructions(err));
 						}
 						let err = "The amount parameter in a BIP 321 bitcoin: URI was invalid";
-						let btc_amt = bitcoin::Amount::from_str_in(v, bitcoin::Denomination::Bitcoin)
-							.map_err(|_| ParseError::InvalidInstructions(err))?;
+						let btc_amt =
+							bitcoin::Amount::from_str_in(v, bitcoin::Denomination::Bitcoin)
+								.map_err(|_| ParseError::InvalidInstructions(err))?;
 						amount = Some(Amount(btc_amt.to_sat() * 1000));
 					} else {
 						let err = "Missing value for an amount parameter in a BIP 321 bitcoin: URI";
@@ -459,7 +472,8 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 						return Err(ParseError::InvalidInstructions(err));
 					}
 					label = v;
-				} else if k.eq_ignore_ascii_case("message") || k.eq_ignore_ascii_case("req-message") {
+				} else if k.eq_ignore_ascii_case("message") || k.eq_ignore_ascii_case("req-message")
+				{
 					if message.is_some() {
 						let err = "Multiple message parameters in a BIP 321 bitcoin: URI";
 						return Err(ParseError::InvalidInstructions(err));
@@ -498,7 +512,7 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 						max_amt_msat = amt_msat;
 					}
 					match method {
-						PaymentMethod::LightningBolt11(_)|PaymentMethod::LightningBolt12(_) => {
+						PaymentMethod::LightningBolt11(_) | PaymentMethod::LightningBolt12(_) => {
 							if let Some(ln_amt_msat) = ln_amt_msat {
 								if ln_amt_msat != amt_msat {
 									let err = "Had multiple different amounts in lightning payment methods in a BIP 321 bitcoin: URI";
@@ -506,8 +520,8 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 								}
 							}
 							ln_amt_msat = Some(amt_msat);
-						}
-						PaymentMethod::OnChain { .. } => {}
+						},
+						PaymentMethod::OnChain { .. } => {},
 					}
 				} else {
 					have_amountless_method = true;
@@ -525,15 +539,11 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 		if methods.is_empty() {
 			Err(ParseError::UnknownPaymentInstructions)
 		} else {
-			Ok(PaymentInstructions {
-				recipient_description,
-				methods,
-				pop_callback,
-				hrn,
-				hrn_proof,
-			})
+			Ok(PaymentInstructions { recipient_description, methods, pop_callback, hrn, hrn_proof })
 		}
-	} else if instructions.len() >= LN_URI_PFX_LEN && instructions[..LN_URI_PFX_LEN].eq_ignore_ascii_case("lightning:") {
+	} else if instructions.len() >= LN_URI_PFX_LEN
+		&& instructions[..LN_URI_PFX_LEN].eq_ignore_ascii_case("lightning:")
+	{
 		// Though there is no specification, lightning: URIs generally only include BOLT 11
 		// invoices.
 		let invoice = Bolt11Invoice::from_str(&instructions[LN_URI_PFX_LEN..])
@@ -550,11 +560,8 @@ fn parse_resolved_payment_instructions(instructions: &str, network: Network, sup
 		if let Ok(addr) = Address::from_str(instructions) {
 			let address = addr.require_network(network).map_err(|_| ParseError::WrongNetwork)?;
 			Ok(PaymentInstructions {
-				recipient_description: None, 
-				methods: vec![PaymentMethod::OnChain {
-					amount: None,
-					address,
-				}],
+				recipient_description: None,
+				methods: vec![PaymentMethod::OnChain { amount: None, address }],
 				pop_callback: None,
 				hrn,
 				hrn_proof,
@@ -602,7 +609,8 @@ pub struct HrnResolution {
 }
 
 /// A future which resolves to a [`HrnResolution`].
-pub type HrnResolutionFuture<'a> = Pin<Box<dyn Future<Output = Result<HrnResolution, &'static str>> + Send + 'a>>;
+pub type HrnResolutionFuture<'a> =
+	Pin<Box<dyn Future<Output = Result<HrnResolution, &'static str>> + Send + 'a>>;
 
 /// An arbitrary resolver for a Human Readable Name.
 ///
@@ -613,7 +621,10 @@ pub type HrnResolutionFuture<'a> = Pin<Box<dyn Future<Output = Result<HrnResolut
 ///
 /// A resolver which uses onion messages over the lightning network for LDK users is provided in
 #[cfg_attr(feature = "std", doc = "[`onion_message_resolver::LDKOnionMessageDNSSECHrnResolver`]")]
-#[cfg_attr(not(feature = "std"), doc = "`onion_message_resolver::LDKOnionMessageDNSSECHrnResolver`")]
+#[cfg_attr(
+	not(feature = "std"),
+	doc = "`onion_message_resolver::LDKOnionMessageDNSSECHrnResolver`"
+)]
 /// if this crate is built with the `std` feature.
 ///
 /// A resolver which uses HTTPS to `dns.google` and HTTPS to arbitrary servers for LN-Address is
@@ -629,12 +640,18 @@ pub trait HrnResolver {
 
 impl PaymentInstructions {
 	/// Resolves a string into [`PaymentInstructions`].
-	pub async fn parse_payment_instructions<H: HrnResolver>(instructions: &str, network: Network, hrn_resolver: H, supports_proof_of_payment_callbacks: bool) -> Result<PaymentInstructions, ParseError> {
+	pub async fn parse_payment_instructions<H: HrnResolver>(
+		instructions: &str, network: Network, hrn_resolver: H,
+		supports_proof_of_payment_callbacks: bool,
+	) -> Result<PaymentInstructions, ParseError> {
+		let supports_pops = supports_proof_of_payment_callbacks;
 		if let Ok(hrn) = HumanReadableName::from_encoded(instructions) {
-			let resolution = hrn_resolver.resolve_hrn(&hrn).await.map_err(|e| ParseError::HrnResolutionError(e))?;
-			parse_resolved_payment_instructions(&resolution.result, network, supports_proof_of_payment_callbacks, Some(hrn), resolution.proof)
+			let resolution = hrn_resolver.resolve_hrn(&hrn).await;
+			let resolution = resolution.map_err(|e| ParseError::HrnResolutionError(e))?;
+			let res = &resolution.result;
+			parse_resolved_instructions(res, network, supports_pops, Some(hrn), resolution.proof)
 		} else {
-			parse_resolved_payment_instructions(instructions, network, supports_proof_of_payment_callbacks, None, None)
+			parse_resolved_instructions(instructions, network, supports_pops, None, None)
 		}
 	}
 }
