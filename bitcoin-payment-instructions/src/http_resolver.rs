@@ -4,11 +4,11 @@
 use std::boxed::Box;
 
 use dnssec_prover::query::{ProofBuilder, QueryBuf};
+use dnssec_prover::rr::{Name, RR, TXT_TYPE};
 use dnssec_prover::ser::parse_rr_stream;
-use dnssec_prover::rr::{TXT_TYPE, RR, Name};
 use dnssec_prover::validation::verify_rr_stream;
 
-use crate::{HumanReadableName, HrnResolutionFuture, HrnResolver, HrnResolution};
+use crate::{HrnResolution, HrnResolutionFuture, HrnResolver, HumanReadableName};
 
 const DOH_ENDPOINT: &'static str = "https://dns.google/dns-query?dns=";
 
@@ -39,28 +39,32 @@ impl HTTPHrnResolver {
 		while let Some(query) = pending_queries.pop() {
 			let client = reqwest::Client::new();
 
-			let request_url = query_to_url(query);
 			let err = "DNS Request to dns.google failed";
-			let req = client.get(request_url).header("accept", "application/dns-message").build().map_err(|_| err)?;
-			let resp = client.execute(req).await.map_err(|_| err )?;
-			let body = resp.bytes().await.map_err(|_| err )?;
+
+			let request_url = query_to_url(query);
+			let req = client.get(request_url).header("accept", "application/dns-message").build();
+			let resp = client.execute(req.map_err(|_| err)?).await.map_err(|_| err)?;
+			let body = resp.bytes().await.map_err(|_| err)?;
 
 			let mut answer = QueryBuf::new_zeroed(0);
 			answer.extend_from_slice(&body[..]);
 			match proof_builder.process_response(&answer) {
-				Ok(queries) =>
+				Ok(queries) => {
 					for query in queries {
 						pending_queries.push(query);
 					}
+				},
 				Err(_) => {
 					return Err("DNS resolution failed");
-				}
+				},
 			}
 		}
-		let proof = proof_builder.finish_proof().map(|(proof, _ttl)| proof)
-			.map_err(|()| "Too many queries required to build proof")?;
 
-		let rrs = parse_rr_stream(&proof).map_err(|()| "DNS Proof Builder somehow generated an invalid proof")?;
+		let err = "Too many queries required to build proof";
+		let proof = proof_builder.finish_proof().map(|(proof, _ttl)| proof).map_err(|()| err)?;
+
+		let rrs = parse_rr_stream(&proof)
+			.map_err(|()| "DNS Proof Builder somehow generated an invalid proof")?;
 		let verified_rrs = verify_rr_stream(&rrs).map_err(|_| "DNSSEC signatures were invalid")?;
 		let resolved_rrs = verified_rrs.resolve_name(&dns_name);
 
@@ -79,10 +83,7 @@ impl HTTPHrnResolver {
 		if let Some(res) = result {
 			let result =
 				String::from_utf8(res).map_err(|_| "TXT record contained an invalid string")?;
-			Ok(HrnResolution {
-				proof: Some(proof),
-				result,
-			})
+			Ok(HrnResolution { proof: Some(proof), result })
 		} else {
 			Err("No validated TXT record found")
 		}
@@ -106,7 +107,14 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_http_hrn_resolver() {
-		let instructions = PaymentInstructions::parse_payment_instructions("send.some@satsto.me", bitcoin::Network::Bitcoin, HTTPHrnResolver, true).await.unwrap();
+		let instructions = PaymentInstructions::parse_payment_instructions(
+			"send.some@satsto.me",
+			bitcoin::Network::Bitcoin,
+			HTTPHrnResolver,
+			true,
+		)
+		.await
+		.unwrap();
 
 		assert_eq!(instructions.max_amount(), None);
 		assert_eq!(instructions.pop_callback(), None);
@@ -119,7 +127,9 @@ mod tests {
 		for method in instructions.methods() {
 			assert_eq!(method.amount(), None);
 			match method {
-				PaymentMethod::LightningBolt11(_) => panic!("Should only have static payment instructions"),
+				PaymentMethod::LightningBolt11(_) => {
+					panic!("Should only have static payment instructions");
+				},
 				PaymentMethod::LightningBolt12(_) => {},
 				PaymentMethod::OnChain { .. } => {},
 			}
