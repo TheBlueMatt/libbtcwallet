@@ -1,6 +1,6 @@
 [package]
 name = "bitcoin-payment-instructions"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Matt Corallo"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/lightningdevkit/libbtcwallet/"
@@ -10,11 +10,13 @@ A parser for arbitrary bitcoin payment instructions.
 edition = "2021"
 
 [package.metadata.docs.rs]
+features = ["std", "http"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 http = ["reqwest" ,"base64", "dnssec-prover", "std"]
 std = ["lightning/std"]
+default = ["std"]
 
 [dependencies]
 lightning-invoice = { version = "0.33", default-features = false }
