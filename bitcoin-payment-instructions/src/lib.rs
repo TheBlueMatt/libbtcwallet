@@ -1,14 +1,8 @@
 //! These days, there are many possible ways to communicate Bitcoin payment instructions.
 //! This crate attempts to unify them into a simple parser which can read text provided directly by
-//! a payer or via a QR code scan/URI open and convert it into payment instructions
+//! a payer or via a QR code scan/URI open and convert it into payment instructions.
 //!
-//! It supports:
-//!  * BIP 321 bitcoin: URIs
-//!  * Lightning BOLT 11 invoices (optionally with the lightning: URI prefix)
-//!  * Lightning BOLT 12 offers
-//!  * On-chain addresses
-//!  * BIP 353 human-readable names in the name@domain format.
-//!  * LN-Address human-readable names in the name@domain format.
+//! See the [`PaymentInstructions`] type for the supported instruction formats.
 //!
 //! This crate doesn't actually help you *pay* these instructions, but provides a unified way to
 //! parse them.
@@ -52,6 +46,7 @@ pub mod amount;
 use amount::Amount;
 
 /// A method which can be used to make a payment
+#[derive(PartialEq, Eq, Debug)]
 pub enum PaymentMethod {
 	/// A payment using lightning as descibred by the given BOLT 11 invoice.
 	LightningBolt11(Bolt11Invoice),
@@ -95,6 +90,15 @@ impl PaymentMethod {
 
 /// Parsed payment instructions representing a set of possible ways to pay, as well as some
 /// associated metadata.
+///
+/// It supports:
+///  * BIP 321 bitcoin: URIs
+///  * Lightning BOLT 11 invoices (optionally with the lightning: URI prefix)
+///  * Lightning BOLT 12 offers
+///  * On-chain addresses
+///  * BIP 353 human-readable names in the name@domain format.
+///  * LN-Address human-readable names in the name@domain format.
+#[derive(PartialEq, Eq, Debug)]
 pub struct PaymentInstructions {
 	recipient_description: Option<String>,
 	methods: Vec<PaymentMethod>,
