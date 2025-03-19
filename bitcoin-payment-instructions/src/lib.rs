@@ -48,52 +48,8 @@ pub mod onion_message_resolver;
 #[cfg(feature = "http")]
 pub mod http_resolver;
 
-/// An amount of Bitcoin
-///
-/// Sadly, because lightning uses "milli-satoshis" we cannot directly use rust-bitcon's `Amount`
-/// type.
-///
-/// In general, when displaying amounts to the user, you should use [`Self::sats_rounded_up`].
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-// TODO: Move this into lightning-types
-pub struct Amount(u64);
-
-impl core::fmt::Debug for Amount {
-	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
-		write!(f, "{} milli-satoshis", self.0)
-	}
-}
-
-impl Amount {
-	/// The amount in milli-satoshis
-	pub const fn msats(&self) -> u64 {
-		self.0
-	}
-
-	/// The amount in satoshis, if it is exactly a whole number of sats.
-	pub const fn sats(&self) -> Result<u64, ()> {
-		if self.0 % 1000 == 0 {
-			Ok(self.0 / 1000)
-		} else {
-			Err(())
-		}
-	}
-
-	/// The amount in satoshis, rounded up
-	pub const fn sats_rounded_up(&self) -> u64 {
-		(self.0 + 999) / 1000
-	}
-
-	/// Constructs a new [`Amount`] for the given number of milli-satoshis.
-	pub const fn from_milli_sats(msats: u64) -> Self {
-		Amount(msats)
-	}
-
-	/// Constructs a new [`Amount`] for the given number of satoshis.
-	pub const fn from_sats(sats: u64) -> Self {
-		Amount(sats * 1000)
-	}
-}
+pub mod amount;
+use amount::Amount;
 
 /// A method which can be used to make a payment
 pub enum PaymentMethod {
@@ -125,10 +81,10 @@ impl PaymentMethod {
 	pub fn amount(&self) -> Option<Amount> {
 		match self {
 			PaymentMethod::LightningBolt11(invoice) => {
-				invoice.amount_milli_satoshis().map(|a| Amount(a))
+				invoice.amount_milli_satoshis().map(|a| Amount::from_milli_sats(a))
 			},
 			PaymentMethod::LightningBolt12(offer) => match offer.amount() {
-				Some(offer::Amount::Bitcoin { amount_msats }) => Some(Amount(amount_msats)),
+				Some(offer::Amount::Bitcoin { amount_msats }) => Some(Amount::from_milli_sats(amount_msats)),
 				Some(offer::Amount::Currency { .. }) => None,
 				None => None,
 			},
@@ -152,7 +108,7 @@ pub struct PaymentInstructions {
 ///
 /// If any [`PaymentMethod::amount`] differs from another by more than this amount, we will
 /// consider it a [`ParseError::InconsistentInstructions`].
-pub const MAX_AMOUNT_DIFFERENCE: Amount = Amount(100 * 1000);
+pub const MAX_AMOUNT_DIFFERENCE: Amount = Amount::from_sats(100);
 
 /// An error when parsing payment instructions into [`PaymentInstructions`].
 #[derive(Debug)]
@@ -193,15 +149,15 @@ impl PaymentInstructions {
 	/// if a recipient wishes to be paid more for on-chain payments to offset their future fees),
 	/// but only up to [`MAX_AMOUNT_DIFFERENCE`].
 	pub fn max_amount(&self) -> Option<Amount> {
-		let mut max_amt_msat = None;
+		let mut max_amt = None;
 		for method in self.methods() {
-			if let Some(amt_msat) = method.amount() {
-				if max_amt_msat.is_none() || max_amt_msat.unwrap() < amt_msat.0 {
-					max_amt_msat = Some(amt_msat.0);
+			if let Some(amt) = method.amount() {
+				if max_amt.is_none() || max_amt.unwrap() < amt {
+					max_amt = Some(amt);
 				}
 			}
 		}
-		max_amt_msat.map(|amt| Amount(amt))
+		max_amt
 	}
 
 	/// The amount which the payment instruction requires payment for when paid over lightning.
@@ -461,7 +417,7 @@ fn parse_resolved_instructions(
 						let btc_amt =
 							bitcoin::Amount::from_str_in(v, bitcoin::Denomination::Bitcoin)
 								.map_err(|_| ParseError::InvalidInstructions(err))?;
-						amount = Some(Amount(btc_amt.to_sat() * 1000));
+						amount = Some(Amount::from_sats(btc_amt.to_sat()));
 					} else {
 						let err = "Missing value for an amount parameter in a BIP 321 bitcoin: URI";
 						return Err(ParseError::InvalidInstructions(err));
