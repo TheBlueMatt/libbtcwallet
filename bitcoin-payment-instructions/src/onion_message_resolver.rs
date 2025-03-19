@@ -2,19 +2,24 @@
 //! resolution directly from untrusted lightning nodes, providing privacy through onion routing.
 
 use std::boxed::Box;
-use std::vec::Vec;
 use std::ops::Deref;
 use std::sync::Mutex;
+use std::vec::Vec;
 
 use lightning::blinded_path::message::DNSResolverContext;
 use lightning::ln::channelmanager::PaymentId;
-use lightning::onion_message::dns_resolution::{DNSResolverMessage, DNSResolverMessageHandler, DNSSECQuery, DNSSECProof, HumanReadableName, OMNameResolver};
-use lightning::onion_message::messenger::{Destination, ResponseInstruction, Responder, MessageSendInstructions};
-use lightning::util::logger::Logger;
-use lightning::sign::EntropySource;
+use lightning::onion_message::dns_resolution::{
+	DNSResolverMessage, DNSResolverMessageHandler, DNSSECProof, DNSSECQuery, HumanReadableName,
+	OMNameResolver,
+};
+use lightning::onion_message::messenger::{
+	Destination, MessageSendInstructions, Responder, ResponseInstruction,
+};
 use lightning::routing::gossip::NetworkGraph;
+use lightning::sign::EntropySource;
+use lightning::util::logger::Logger;
 
-use crate::{HrnResolutionFuture, HrnResolver, HrnResolution};
+use crate::{HrnResolution, HrnResolutionFuture, HrnResolver};
 
 struct OsRng;
 impl EntropySource for OsRng {
@@ -27,13 +32,21 @@ impl EntropySource for OsRng {
 
 /// A [`HrnResolver`] which uses lightning onion messages and DNSSEC proofs to request DNS
 /// resolution directly from untrusted lightning nodes, providing privacy through onion routing.
-pub struct LDKOnionMessageDNSSECHrnResolver<N: Deref<Target = NetworkGraph<L>>, L: Deref> where L::Target: Logger {
+///
+/// NOTE THAT THIS DOES NOT YET WORK AND IS NOT YET FULLY IMPLEMENTED
+pub struct LDKOnionMessageDNSSECHrnResolver<N: Deref<Target = NetworkGraph<L>>, L: Deref>
+where
+	L::Target: Logger,
+{
 	network_graph: N,
 	resolver: OMNameResolver,
 	message_queue: Mutex<Vec<(DNSResolverMessage, MessageSendInstructions)>>,
 }
 
-impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> LDKOnionMessageDNSSECHrnResolver<N, L> where L::Target: Logger {
+impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> LDKOnionMessageDNSSECHrnResolver<N, L>
+where
+	L::Target: Logger,
+{
 	async fn resolve_hrn(&self, hrn: &HumanReadableName) -> Result<HrnResolution, &'static str> {
 		let mut dns_resolvers = Vec::new();
 		for (node_id, node) in self.network_graph.read_only().nodes().unordered_iter() {
@@ -56,11 +69,14 @@ impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> LDKOnionMessageDNSSECHrnResol
 			}
 		}
 		if dns_resolvers.is_empty() {
-			return Err("Failed to find any DNS resolving nodes, check your network graph is synced");
+			return Err(
+				"Failed to find any DNS resolving nodes, check your network graph is synced",
+			);
 		}
 		let payment_id = PaymentId(OsRng.get_secure_random_bytes());
 		let err = "The provided HRN did not fit in a DNS request";
-		let (query, _context) = self.resolver.resolve_name(payment_id, hrn.clone(), &OsRng).map_err(|_| err)?;
+		let (query, _context) =
+			self.resolver.resolve_name(payment_id, hrn.clone(), &OsRng).map_err(|_| err)?;
 		// XXX: need reply path to us here (https://github.com/lightningdevkit/rust-lightning/issues/3669)
 		// let reply_path = new_reply_path(context)
 
@@ -76,10 +92,16 @@ impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> LDKOnionMessageDNSSECHrnResol
 	}
 }
 
-impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> DNSResolverMessageHandler for LDKOnionMessageDNSSECHrnResolver<N, L> where L::Target: Logger {
+impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> DNSResolverMessageHandler
+	for LDKOnionMessageDNSSECHrnResolver<N, L>
+where
+	L::Target: Logger,
+{
 	fn handle_dnssec_query(
 		&self, _: DNSSECQuery, _: Option<Responder>,
-	) -> Option<(DNSResolverMessage, ResponseInstruction)> { None }
+	) -> Option<(DNSResolverMessage, ResponseInstruction)> {
+		None
+	}
 
 	fn handle_dnssec_proof(&self, msg: DNSSECProof, context: DNSResolverContext) {
 		let results = self.resolver.handle_dnssec_proof_for_uri(msg, context);
@@ -95,10 +117,12 @@ impl<N: Deref<Target = NetworkGraph<L>>, L: Deref> DNSResolverMessageHandler for
 	}
 }
 
-impl<N: Deref<Target = NetworkGraph<L>> + Sync, L: Deref> HrnResolver for LDKOnionMessageDNSSECHrnResolver<N, L> where L::Target: Logger {
+impl<N: Deref<Target = NetworkGraph<L>> + Sync, L: Deref> HrnResolver
+	for LDKOnionMessageDNSSECHrnResolver<N, L>
+where
+	L::Target: Logger,
+{
 	fn resolve_hrn<'a>(&'a self, hrn: &'a HumanReadableName) -> HrnResolutionFuture<'a> {
-		Box::pin(async move {
-			self.resolve_hrn(hrn).await
-		})
+		Box::pin(async move { self.resolve_hrn(hrn).await })
 	}
 }

@@ -79,7 +79,9 @@ impl PaymentMethod {
 				invoice.amount_milli_satoshis().map(|a| Amount::from_milli_sats(a))
 			},
 			PaymentMethod::LightningBolt12(offer) => match offer.amount() {
-				Some(offer::Amount::Bitcoin { amount_msats }) => Some(Amount::from_milli_sats(amount_msats)),
+				Some(offer::Amount::Bitcoin { amount_msats }) => {
+					Some(Amount::from_milli_sats(amount_msats))
+				},
 				Some(offer::Amount::Currency { .. }) => None,
 				None => None,
 			},
