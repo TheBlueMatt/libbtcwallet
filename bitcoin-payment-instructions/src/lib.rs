@@ -43,6 +43,9 @@ pub mod onion_message_resolver;
 pub mod http_resolver;
 
 pub mod amount;
+
+pub mod receive;
+
 use amount::Amount;
 
 /// A method which can be used to make a payment
