@@ -59,6 +59,7 @@ struct WalletImpl {
 	tunables: Tunables,
 	network: Network,
 	tx_metadata: TxMetadataStore,
+	balance_mutex: tokio::sync::Mutex<()>,
 	store: Arc<dyn KVStore + Send + Sync>,
 }
 
@@ -223,6 +224,7 @@ impl Wallet {
 			tunables,
 			tx_metadata: TxMetadataStore::new(Arc::clone(&store)),
 			store,
+			balance_mutex: tokio::sync::Mutex::new(()),
 		});
 
 		let inner_ref = Arc::clone(&inner);
@@ -240,8 +242,10 @@ impl Wallet {
 						let payment_id = PaymentId::Custodial(payment.id.clone());
 						let have_metadata =
 							if let Some(metadata) = inner_ref.tx_metadata.read().get(&payment_id) {
-								if latest_tx.is_none() || latest_tx.as_ref().unwrap().0 < metadata.time {
-									latest_tx = Some((metadata.time, &payment.id));
+								if let TxType::Payment { .. } = &metadata.ty {
+									if latest_tx.is_none() || latest_tx.as_ref().unwrap().0 < metadata.time {
+										latest_tx = Some((metadata.time, &payment.id));
+									}
 								}
 								true
 							} else {
@@ -275,6 +279,7 @@ impl Wallet {
 	}
 
 	async fn do_custodial_rebalance(inner: &Arc<WalletImpl>, triggering_transaction_id: PaymentId) {
+		let _lock = inner.balance_mutex.lock().await;
 		let lightning_receivable = inner.ln_wallet.estimate_receivable_balance();
 		let custodial_balance = inner.custodial.get_balance();
 		let mut transfer_amt = cmp::min(lightning_receivable, custodial_balance);
@@ -294,7 +299,13 @@ impl Wallet {
 						for payment in inner.ln_wallet.list_payments() {
 							if let LightningPaymentKind::Bolt11 { hash, .. } = payment.kind {
 								if &hash.0[..] == &expected_hash[..] {
-									received_payment_id = Some(payment.id);
+									match payment.status.into() {
+										TxStatus::Completed => {
+											received_payment_id = Some(payment.id);
+										},
+										TxStatus::Pending => {},
+										TxStatus::Failed => return,
+									}
 									break;
 								}
 							}
