@@ -23,5 +23,6 @@ bitcoin-payment-instructions = { version = "0.0.2", path = "../bitcoin-payment-i
 tokio = { version = "1.0", default-features = false, features = ["rt-multi-thread"] }
 spark-rust = { version = "0.1.9" }
 spark-protos = { version = "0.1.5", default-features = false }
+uuid = { version = "1.0", default-features = false }
 
 [dev-dependencies]

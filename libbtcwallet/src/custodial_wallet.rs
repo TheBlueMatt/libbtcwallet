@@ -3,6 +3,9 @@ use crate::{InitFailure, WalletConfig, TxStatus};
 use ldk_node::bitcoin::hashes::sha256::Hash as Sha256;
 use ldk_node::bitcoin::hashes::Hash;
 use ldk_node::bitcoin::Network;
+use ldk_node::bitcoin::io;
+use ldk_node::lightning::ln::msgs::DecodeError;
+use ldk_node::lightning::util::ser::{Readable, Writeable, Writer};
 
 use bitcoin_payment_instructions::PaymentMethod;
 use bitcoin_payment_instructions::amount::Amount;
@@ -17,10 +20,34 @@ use spark_rust::signer::traits::SparkSigner;
 use spark_protos::spark::TransferStatus;
 
 use std::future::Future;
+use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub(crate) type CustodialPaymentId = String;
+#[derive(Clone, Hash, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct CustodialPaymentId(uuid::Uuid);
+impl Readable for CustodialPaymentId {
+	fn read<R: io::Read>(r: &mut R) -> Result<Self, DecodeError> {
+		Ok(CustodialPaymentId(uuid::Uuid::from_bytes(Readable::read(r)?)))
+	}
+}
+impl Writeable for CustodialPaymentId {
+	fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
+		self.0.as_bytes().write(w)
+	}
+}
+impl fmt::Display for CustodialPaymentId {
+	fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+		self.0.fmt(f)
+	}
+}
+impl FromStr for CustodialPaymentId {
+	type Err = <uuid::Uuid as FromStr>::Err;
+	fn from_str(s: &str) -> Result<Self, <uuid::Uuid as FromStr>::Err> {
+		Ok(CustodialPaymentId(uuid::Uuid::from_str(s)?))
+	}
+}
 
 pub(crate) type Error = SparkSdkError;
 
@@ -102,9 +129,9 @@ impl CustodialWalletInterface for SparkWallet {
 			let mut res = Vec::with_capacity(transfers.len());
 			for transfer in transfers {
 				res.push(Payment {
-					status: transfer.status().into(),
-					id: transfer.id,
-					amount: Amount::from_sats(transfer.total_value),
+					status: transfer.status.into(),
+					id: CustodialPaymentId(transfer.id),
+					amount: Amount::from_sats(transfer.total_value_sats),
 					fee: Amount::from_sats(0), // TODO: Missing upstream?
 				});
 			}
@@ -124,7 +151,9 @@ impl CustodialWalletInterface for SparkWallet {
 	fn pay(&self, method: &PaymentMethod, amount: Amount) -> impl Future<Output = Result<CustodialPaymentId, Error>> + Send {
 		async move {
 			if let PaymentMethod::LightningBolt11(invoice) = method {
-				self.spark_wallet.pay_lightning_invoice(&invoice.to_string()).await
+				Ok(CustodialPaymentId(
+					self.spark_wallet.pay_lightning_invoice(&invoice.to_string()).await?
+				))
 			} else {
 				Err(Error::General("Only BOLT 11 is currently supported".to_owned()))
 			}

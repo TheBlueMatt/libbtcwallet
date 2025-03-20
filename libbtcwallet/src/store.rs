@@ -69,7 +69,10 @@ impl FromStr for PaymentId {
 				let id = FromHex::from_hex(&s[3..]).map_err(|_| ())?;
 				Ok(PaymentId::Lightning(id))
 			},
-			"CU-" => Ok(PaymentId::Custodial(s[3..].to_owned())),
+			"CU-" => {
+				let id = CustodialPaymentId::from_str(&s[3..]).map_err(|_| ())?;
+				Ok(PaymentId::Custodial(id))
+			},
 			_ => Err(())
 		}
 	}
