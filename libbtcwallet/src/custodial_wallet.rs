@@ -56,6 +56,7 @@ pub(crate) struct Payment {
 	pub(crate) amount: Amount,
 	pub(crate) fee: Amount,
 	pub(crate) status: TxStatus,
+	pub(crate) outbound: bool,
 }
 
 impl From<TransferStatus> for TxStatus {
@@ -125,6 +126,7 @@ impl CustodialWalletInterface for SparkWallet {
 	}
 	fn list_payments(&self) -> impl Future<Output = Result<Vec<Payment>, Error>> + Send {
 		async move {
+			let our_pk = self.spark_wallet.get_spark_address().await?;
 			let transfers = self.spark_wallet.get_all_transfers(None, None).await?.transfers;
 			let mut res = Vec::with_capacity(transfers.len());
 			for transfer in transfers {
@@ -132,7 +134,8 @@ impl CustodialWalletInterface for SparkWallet {
 					status: transfer.status.into(),
 					id: CustodialPaymentId(transfer.id),
 					amount: Amount::from_sats(transfer.total_value_sats),
-					fee: Amount::from_sats(0), // TODO: Missing upstream?
+					outbound: transfer.sender_identity_public_key == our_pk,
+					fee: Amount::from_sats(0), // Currently everything is free
 				});
 			}
 			Ok(res)

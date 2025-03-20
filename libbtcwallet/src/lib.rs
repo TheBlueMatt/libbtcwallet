@@ -232,6 +232,10 @@ impl Wallet {
 					let mut new_txn = Vec::new();
 					let mut latest_tx: Option<(Duration, _)> = None;
 					for payment in custodial_payments.iter() {
+						if payment.outbound {
+							// Assume it'll be tracked by the sending task.
+							// TODO: Maybe use this to backfill stuff we lost on crash?
+						}
 						let payment_id = PaymentId::Custodial(payment.id.clone());
 						let have_metadata =
 							if let Some(metadata) = inner_ref.tx_metadata.read().get(&payment_id) {
