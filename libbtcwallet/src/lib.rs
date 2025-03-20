@@ -290,15 +290,19 @@ impl Wallet {
 				let expected_hash = *inv.payment_hash();
 				if let Ok(rebalance_id) = inner.custodial.pay(&PaymentMethod::LightningBolt11(inv), transfer_amt).await {
 					let mut received_payment_id = None;
-					for payment in inner.ln_wallet.list_payments() {
-						if let LightningPaymentKind::Bolt11 { hash, .. } = payment.kind {
-							if &hash.0[..] == &expected_hash[..] {
-								received_payment_id = Some(payment.id);
-								break;
+					while received_payment_id.is_none() {
+						for payment in inner.ln_wallet.list_payments() {
+							if let LightningPaymentKind::Bolt11 { hash, .. } = payment.kind {
+								if &hash.0[..] == &expected_hash[..] {
+									received_payment_id = Some(payment.id);
+									break;
+								}
 							}
 						}
+						if received_payment_id.is_none() {
+							inner.ln_wallet.await_payment_receipt().await;
+						}
 					}
-					debug_assert!(received_payment_id.is_some());
 					let lightning_id = received_payment_id.map(|id| id.0).unwrap_or([0; 32]);
 					inner.tx_metadata.set_tx_caused_rebalance(&triggering_transaction_id)
 						.expect("TODO: This is race-y, we really need some kind of mutex on custodial rebalances happening");

@@ -14,6 +14,7 @@ use lightning_invoice::Bolt11Invoice; // TODO: Re-export this from `lightning`
 use std::sync::Arc;
 
 use tokio::runtime::Runtime;
+use tokio::sync::watch;
 
 impl From<PaymentStatus> for TxStatus {
 	fn from(o: PaymentStatus) -> TxStatus {
@@ -60,8 +61,12 @@ impl From<&PaymentDetails> for PaymentType {
 	}
 }
 
+struct LightningWalletImpl {
+	ldk_node: ldk_node::Node,
+	payment_receipt_flag: watch::Receiver<()>,
+}
 pub(crate) struct LightningWallet {
-	ldk_node: Arc<ldk_node::Node>,
+	inner: Arc<LightningWalletImpl>,
 }
 
 impl LightningWallet {
@@ -82,17 +87,25 @@ impl LightningWallet {
 				builder.set_chain_source_bitcoind_rpc(host, port, user, password),
 		};
 
-		let ldk_node = Arc::new(builder.build_with_store(store)?);
+		let ldk_node = builder.build_with_store(store)?;
+		let (payment_receipt_sender, payment_receipt_flag) = watch::channel(());
+		let inner = Arc::new(LightningWalletImpl {
+			ldk_node,
+			payment_receipt_flag,
+		});
 
-		ldk_node.start_with_runtime(Arc::clone(&runtime))?;
+		inner.ldk_node.start_with_runtime(Arc::clone(&runtime))?;
 
-		let events_ldk_node = Arc::clone(&ldk_node);
+		let events_ref = Arc::clone(&inner);
 		runtime.spawn(async move {
 			loop {
-				match events_ldk_node.next_event_async().await {
+				let event = events_ref.ldk_node.next_event_async().await;
+				match event {
 					Event::PaymentSuccessful { .. } => {},
 					Event::PaymentFailed { .. } => {},
-					Event::PaymentReceived { .. } => {},
+					Event::PaymentReceived { .. } => {
+						let _ = payment_receipt_sender.send(());
+					},
 					Event::PaymentClaimable { .. } => {},
 					Event::ChannelPending { .. } => {},
 					Event::ChannelReady { .. } => {},
@@ -100,14 +113,21 @@ impl LightningWallet {
 						// TODO: Oof! Probably open a new channel with our LSP
 					},
 				}
+				events_ref.ldk_node.event_handled();
 			}
 		});
 
-		Ok(Self { ldk_node })
+		Ok(Self { inner })
+	}
+
+	pub(crate) async fn await_payment_receipt(&self) {
+		let mut flag = self.inner.payment_receipt_flag.clone();
+		flag.mark_unchanged();
+		let _ = flag.changed().await;
 	}
 
 	pub(crate) fn get_on_chain_address(&self) -> Result<Address, NodeError> {
-		self.ldk_node.onchain_payment().new_address()
+		self.inner.ldk_node.onchain_payment().new_address()
 	}
 
 	pub(crate) async fn get_bolt11_invoice(&self, amount: Option<Amount>) -> Result<Bolt11Invoice, NodeError> {
@@ -115,16 +135,16 @@ impl LightningWallet {
 		// on the non-JIT channel, but we should check that (in the spec/impl?)
 		let inv_str = if let Some(amt) = amount {
 			if self.estimate_receivable_balance() >= amt {
-				self.ldk_node.bolt11_payment().receive(amt.msats(), "", 86400)
+				self.inner.ldk_node.bolt11_payment().receive(amt.msats(), "", 86400)
 			} else {
-				self.ldk_node.bolt11_payment().receive_via_jit_channel(amt.msats(), "", 86400, None)
+				self.inner.ldk_node.bolt11_payment().receive_via_jit_channel(amt.msats(), "", 86400, None)
 			}
 		} else {
 			const RECEIVABLE_MIN: Amount = Amount::from_sats(100_000);
 			if self.estimate_receivable_balance() >= RECEIVABLE_MIN {
-				self.ldk_node.bolt11_payment().receive_variable_amount("", 86400)
+				self.inner.ldk_node.bolt11_payment().receive_variable_amount("", 86400)
 			} else {
-				self.ldk_node.bolt11_payment().receive_variable_amount_via_jit_channel("", 86400, None)
+				self.inner.ldk_node.bolt11_payment().receive_variable_amount_via_jit_channel("", 86400, None)
 			}
 		}?.to_string();
 		// TODO: Drop this once ldk-node upgrades to 0.1
@@ -134,11 +154,11 @@ impl LightningWallet {
 	}
 
 	pub(crate) fn list_payments(&self) -> Vec<PaymentDetails> {
-		self.ldk_node.list_payments()
+		self.inner.ldk_node.list_payments()
 	}
 
 	pub(crate) fn get_balance(&self) -> (Amount, Amount) {
-		let balances = self.ldk_node.list_balances();
+		let balances = self.inner.ldk_node.list_balances();
 		(
 			Amount::from_sats(balances.total_lightning_balance_sats),
 			Amount::from_sats(balances.total_onchain_balance_sats),
@@ -150,7 +170,7 @@ impl LightningWallet {
 		// receive in a single channel. While this could be an underestimate, hopefully by the time
 		// any of this ships we support splicing and no one ever ends up with more than one channel
 		// anyway.
-		if let Some(chan) = self.ldk_node.list_channels().first() {
+		if let Some(chan) = self.inner.ldk_node.list_channels().first() {
 			return Amount::from_milli_sats(chan.inbound_capacity_msat);
 		}
 		Amount::from_sats(0)
@@ -168,22 +188,22 @@ impl LightningWallet {
 				// TODO: Drop this once ldk-node upgrades to 0.1
 				let inv_str = invoice.to_string();
 				let inv = ldk_node::lightning_invoice::Bolt11Invoice::from_str(&inv_str).unwrap();
-				self.ldk_node.bolt11_payment().send_using_amount(&inv, amount.msats(), None)
+				self.inner.ldk_node.bolt11_payment().send_using_amount(&inv, amount.msats(), None)
 			},
 			PaymentMethod::LightningBolt12(offer) => {
 				// TODO: Drop this once ldk-node upgrades to 0.1
 				let offer_str = offer.to_string();
 				let off = ldk_node::lightning::offers::offer::Offer::from_str(&offer_str).unwrap();
-				self.ldk_node.bolt12_payment().send_using_amount(&off, amount.msats(), None, None)
+				self.inner.ldk_node.bolt12_payment().send_using_amount(&off, amount.msats(), None, None)
 			},
 			PaymentMethod::OnChain { address, amount: _ } => {
-				self.ldk_node.onchain_payment().send_to_address(address, amount.sats_rounding_up())
+				self.inner.ldk_node.onchain_payment().send_to_address(address, amount.sats_rounding_up())
 					.map(|txid| PaymentId(*txid.as_ref()))
 			},
 		}
 	}
 
 	pub(crate) fn stop(&self) {
-		let _ = self.ldk_node.stop();
+		let _ = self.inner.ldk_node.stop();
 	}
 }
