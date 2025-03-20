@@ -114,7 +114,7 @@ impl_writeable_tlv_based_enum!(PaymentType,
 
 );
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum TxType {
 	TransferToNonCustodial {
 		custodial_payment: CustodialPaymentId,
@@ -138,7 +138,7 @@ impl_writeable_tlv_based_enum!(TxType,
 	(2, Payment) => { (0, ty, required), },
 );
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct TxMetadata {
 	pub(crate) time: Duration,
 	pub(crate) ty: TxType,
@@ -181,5 +181,23 @@ impl TxMetadataStore {
 		debug_assert!(old.is_none());
 		self.store.write(STORE_PRIMARY_KEY, STORE_SECONDARY_KEY, &key_str, &ser)
 			.expect("We do not allow writes to fail");
+	}
+
+	pub fn set_tx_caused_rebalance(&self, payment_id: &PaymentId) -> Result<(), ()> {
+		let mut tx_metadata = self.tx_metadata.write().unwrap();
+		if let Some(metadata) = tx_metadata.get_mut(payment_id) {
+			if let TxType::Payment { ty } = &mut metadata.ty {
+				metadata.ty = TxType::PaymentTriggeringTransferToNonCustodial { ty: ty.clone() };
+				let key_str = payment_id.to_string();
+				let ser = metadata.encode();
+				self.store.write(STORE_PRIMARY_KEY, STORE_SECONDARY_KEY, &key_str, &ser)
+					.expect("We do not allow writes to fail");
+				Ok(())
+			} else {
+				Err(())
+			}
+		} else {
+			Err(())
+		}
 	}
 }

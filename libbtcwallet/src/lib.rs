@@ -291,14 +291,19 @@ impl Wallet {
 						}
 					}
 					debug_assert!(received_payment_id.is_some());
-					inner.tx_metadata.insert(PaymentId::Custodial(rebalance_id.clone()), TxMetadata {
+					let lightning_id = received_payment_id.map(|id| id.0).unwrap_or([0; 32]);
+					inner.tx_metadata.set_tx_caused_rebalance(&triggering_transaction_id)
+						.expect("TODO: This is race-y, we really need some kind of mutex on custodial rebalances happening");
+					let metadata = TxMetadata {
 						ty: TxType::TransferToNonCustodial {
-							custodial_payment: rebalance_id,
-							lightning_payment: received_payment_id.map(|id| id.0).unwrap_or([0; 32]),
+							custodial_payment: rebalance_id.clone(),
+							lightning_payment: lightning_id.clone(),
 							payment_triggering_transfer: triggering_transaction_id,
 						},
 						time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
-					});
+					};
+					inner.tx_metadata.insert(PaymentId::Custodial(rebalance_id), metadata.clone());
+					inner.tx_metadata.insert(PaymentId::Lightning(lightning_id), metadata.clone());
 				}
 			}
 		}
@@ -322,7 +327,7 @@ impl Wallet {
 		for payment in custodial_payments {
 			if let Some(tx_metadata) = tx_metadata.get(&PaymentId::Custodial(payment.id.clone())) {
 				match &tx_metadata.ty {
-					TxType::TransferToNonCustodial { custodial_payment, lightning_payment, payment_triggering_transfer } => {
+					TxType::TransferToNonCustodial { custodial_payment, lightning_payment: _, payment_triggering_transfer } => {
 						let entry = internal_transfers.entry((*payment_triggering_transfer).clone())
 							.or_insert(InternalTransfer {
 								lightning_receive_fee: None,
@@ -373,7 +378,7 @@ eprintln!("tx id {}", payment.id);
 		for payment in lightning_payments {
 			if let Some(tx_metadata) = tx_metadata.get(&PaymentId::Lightning(payment.id.0)) {
 				match &tx_metadata.ty {
-					TxType::TransferToNonCustodial { custodial_payment, lightning_payment, payment_triggering_transfer } => {
+					TxType::TransferToNonCustodial { custodial_payment: _, lightning_payment, payment_triggering_transfer } => {
 						let entry = internal_transfers.entry(payment_triggering_transfer.clone())
 							.or_insert(InternalTransfer {
 								lightning_receive_fee: None,
@@ -387,7 +392,7 @@ eprintln!("tx id {}", payment.id);
 							debug_assert!(false);
 						}
 					},
-					TxType::PaymentTriggeringTransferToNonCustodial { ty } => {
+					TxType::PaymentTriggeringTransferToNonCustodial { ty: _ } => {
 						let entry = internal_transfers.entry(PaymentId::Lightning(payment.id.0))
 							.or_insert(InternalTransfer {
 								lightning_receive_fee: None,
@@ -404,7 +409,7 @@ eprintln!("tx id {}", payment.id);
 							payment_type: (&payment).into(),
 						});
 					},
-					TxType::Payment { ty } => {
+					TxType::Payment { ty: _ } => {
 						debug_assert!(false); // Shouldn't even have an entry
 						res.push(Transaction {
 							status: payment.status.into(),
