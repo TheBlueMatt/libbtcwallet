@@ -122,7 +122,7 @@ impl ReceiveInstructions {
         // try to parse private key first, if the first character is an 'L' or 'K' on mainnet or 'c' on testnet
         // then it may be a valid WIF private key
         if let Ok(pk) = bitcoin::key::PrivateKey::from_wif(instructions) {
-            if pk.network != network {
+            if pk.network != network.into() {
                 return Err(ParseError::WrongNetwork);
             }
 
