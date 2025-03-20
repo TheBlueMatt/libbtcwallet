@@ -235,6 +235,7 @@ impl Wallet {
 						if payment.outbound {
 							// Assume it'll be tracked by the sending task.
 							// TODO: Maybe use this to backfill stuff we lost on crash?
+							continue;
 						}
 						let payment_id = PaymentId::Custodial(payment.id.clone());
 						let have_metadata =
@@ -355,7 +356,7 @@ impl Wallet {
 						debug_assert!(entry.transaction.is_none());
 						entry.transaction = Some(Transaction {
 							status: payment.status,
-							outbound: false, // XXX: debug_assert this from spark
+							outbound: payment.outbound,
 							amount: payment.amount,
 							fee: payment.fee,
 							payment_type: ty.clone(),
@@ -366,7 +367,7 @@ impl Wallet {
 						debug_assert!(!matches!(ty, PaymentType::IncomingOnChain { .. }));
 						res.push(Transaction {
 							status: payment.status,
-							outbound: true, // XXX: need this from spark
+							outbound: payment.outbound,
 							amount: payment.amount,
 							fee: payment.fee,
 							payment_type: ty.clone(),
