@@ -1,10 +1,11 @@
-//! These days, there are many possible ways to communicate Bitcoin receive instructions.
-//! This crate attempts to unify them into a simple parser which can read text provided directly by
-//! a receiver or via a QR code scan/URI open and convert it into receive instructions.
+//! These days, there are several possible ways to communicate Bitcoin receive instructions.
+//!
+//! This module attempts to unify them into a simple parser which can read text provided directly
+//! by a receiver or via a QR code scan/URI open and convert it into receive instructions.
 //!
 //! See the [`ReceiveInstructions`] type for the supported instruction formats.
 //!
-//! This crate doesn't actually help you *receive* these instructions, but provides a unified way to
+//! This module doesn't actually help you *receive* these funds, but provides a unified way to
 //! parse them.
 
 use crate::split_once;
@@ -26,17 +27,17 @@ pub enum ReceiveMethod {
 /// An error when parsing payment instructions into [`ReceiveInstructions`].
 #[derive(Debug)]
 pub enum ParseError {
-    /// An invalid lightning BOLT 12 offer was encountered
+    /// An invalid lightning BOLT 12 refund was encountered
     InvalidBolt12(Bolt12ParseError),
-    /// The payment instructions encoded instructions for a network other than the one specified.
+    /// The receive instructions encoded instructions for a network other than the one specified.
     WrongNetwork,
     /// The instructions were invalid due to a semantic error.
     ///
     /// A developer-readable error string is provided, though you may or may not wish to provide
     /// this directly to users.
     InvalidInstructions(&'static str),
-    /// The payment instructions did not appear to match any known form of payment instructions.
-    UnknownPaymentInstructions,
+    /// The receive instructions did not appear to match any known form of receive instructions.
+    UnknownReceiveInstructions,
     /// The BIP 321 bitcoin: URI included unknown required parameter(s)
     UnknownRequiredParameter,
     // TODO: expiry and check it for ln stuff!
@@ -97,7 +98,7 @@ impl ReceiveInstructions {
                                     return Err(ParseError::WrongNetwork);
                                 }
 
-                                description = Some(refund.description().to_string());
+                                description = Some(refund.description().0.to_string());
                                 methods.push(ReceiveMethod::Bolt12Refund(refund));
                             }
                             Err(err) => return Err(ParseError::InvalidBolt12(err)),
@@ -109,7 +110,7 @@ impl ReceiveInstructions {
             }
 
             if methods.is_empty() {
-                return Err(ParseError::UnknownPaymentInstructions);
+                return Err(ParseError::UnknownReceiveInstructions);
             }
 
             return Ok(ReceiveInstructions {
@@ -142,6 +143,6 @@ impl ReceiveInstructions {
             });
         }
 
-        Err(ParseError::UnknownPaymentInstructions)
+        Err(ParseError::UnknownReceiveInstructions)
     }
 }
