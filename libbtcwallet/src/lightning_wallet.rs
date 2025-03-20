@@ -166,14 +166,10 @@ impl LightningWallet {
 	}
 
 	pub(crate) fn estimate_receivable_balance(&self) -> Amount {
-		// Estimate the amount we can receive. We currently just try to figure out how much we can
-		// receive in a single channel. While this could be an underestimate, hopefully by the time
-		// any of this ships we support splicing and no one ever ends up with more than one channel
-		// anyway.
-		if let Some(chan) = self.inner.ldk_node.list_channels().first() {
-			return Amount::from_milli_sats(chan.inbound_capacity_msat);
-		}
-		Amount::from_sats(0)
+		// Estimate the amount we can receive. Note that this is pretty rough and generally an
+		// overestimate.
+		let amt = self.inner.ldk_node.list_channels().iter().map(|chan| chan.inbound_capacity_msat).max();
+		Amount::from_milli_sats(amt.unwrap_or(0))
 	}
 
 	pub(crate) async fn estimate_fee(&self, method: &PaymentMethod, amount: Amount) -> Result<Amount, NodeError> {

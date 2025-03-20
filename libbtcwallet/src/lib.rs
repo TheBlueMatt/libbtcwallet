@@ -261,7 +261,7 @@ impl Wallet {
 							});
 						}
 					}
-					if inner_ref.custodial.get_balance() > inner_ref.tunables.custodial_balance_limit {
+					if Self::get_balance_amt(&inner_ref).is_some() {
 						new_txn.sort_unstable();
 						let victim_id = new_txn.first().map(|(_, id)| *id).unwrap_or_else(|| {
 							// Should only happen due to races settling balance, pick the latest.
@@ -278,15 +278,26 @@ impl Wallet {
 		Ok(Wallet { inner })
 	}
 
-	async fn do_custodial_rebalance(inner: &Arc<WalletImpl>, triggering_transaction_id: PaymentId) {
-		let _lock = inner.balance_mutex.lock().await;
-		let lightning_receivable = inner.ln_wallet.estimate_receivable_balance();
+	fn get_balance_amt(inner: &Arc<WalletImpl>) -> Option<Amount> {
+		// We always assume lighting balance is an overestimate by `rebalance_min`.
+		let lightning_receivable = inner.ln_wallet.estimate_receivable_balance()
+			.saturating_sub(inner.tunables.rebalance_min);
 		let custodial_balance = inner.custodial.get_balance();
 		let mut transfer_amt = cmp::min(lightning_receivable, custodial_balance);
 		if custodial_balance.saturating_sub(transfer_amt) > inner.tunables.custodial_balance_limit {
+			// We need to just get a new channel, there's too much that we need to get to lightning
 			transfer_amt = custodial_balance;
 		}
 		if transfer_amt > inner.tunables.rebalance_min {
+			Some(transfer_amt)
+		} else {
+			None
+		}
+	}
+
+	async fn do_custodial_rebalance(inner: &Arc<WalletImpl>, triggering_transaction_id: PaymentId) {
+		let _lock = inner.balance_mutex.lock().await;
+		if let Some(transfer_amt) = Self::get_balance_amt(inner) {
 			if let Ok(inv) = inner.ln_wallet.get_bolt11_invoice(Some(transfer_amt)).await {
 				//TODO: Drop this once ldk-node upgrades to 0.1
 				let inv_str = inv.to_string();
