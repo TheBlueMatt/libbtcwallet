@@ -29,7 +29,7 @@ use alloc::vec::Vec;
 use core::future::Future;
 use core::pin::Pin;
 
-use bitcoin::{address, Address, Network};
+use bitcoin::{address, Address, AddressType, Network};
 use lightning::offers::offer::{self, Offer};
 use lightning::offers::parse::Bolt12ParseError;
 use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescriptionRef, ParseOrSemanticError};
@@ -320,18 +320,19 @@ fn parse_resolved_instructions(
 				let (k, v) = split_once(param, '=');
 				if k.eq_ignore_ascii_case("bc") || k.eq_ignore_ascii_case("req-bc") {
 					if let Some(address_string) = v {
-						if address_string.len() < 3
-							|| !address_string[..3].eq_ignore_ascii_case("bc1")
+						let addr = Address::from_str(address_string)
+							.map_err(|e| ParseError::InvalidOnChain(e))?;
+						let address =
+							addr.require_network(network).map_err(|_| ParseError::WrongNetwork)?;
+
+						if address.address_type().is_some_and(|a| matches!(a, AddressType::P2pkh | AddressType::P2sh))
 						{
 							// `bc` key-values must only include bech32/bech32m strings with HRP
 							// "bc" (i.e. Segwit addresses).
 							let err = "BIP 321 bitcoin: URI contained a bc instruction which was not a Segwit address (bc1*)";
 							return Err(ParseError::InvalidInstructions(err));
 						}
-						let addr = Address::from_str(address_string)
-							.map_err(|e| ParseError::InvalidOnChain(e))?;
-						let address =
-							addr.require_network(network).map_err(|_| ParseError::WrongNetwork)?;
+
 						methods.push(PaymentMethod::OnChain { amount: None, address });
 					} else {
 						let err = "BIP 321 bitcoin: URI contained a bc (Segwit address) instruction without a value";
