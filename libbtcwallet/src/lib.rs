@@ -225,46 +225,83 @@ impl Wallet {
 			store,
 		});
 
+		let inner_ref = Arc::clone(&inner);
+		tokio::spawn(async move {
+			loop {
+				if let Ok(custodial_payments) = inner_ref.custodial.list_payments().await {
+					let mut new_txn = Vec::new();
+					let mut latest_tx: Option<(Duration, _)> = None;
+					for payment in custodial_payments.iter() {
+						let payment_id = PaymentId::Custodial(payment.id.clone());
+						let have_metadata =
+							if let Some(metadata) = inner_ref.tx_metadata.read().get(&payment_id) {
+								if latest_tx.is_none() || latest_tx.as_ref().unwrap().0 < metadata.time {
+									latest_tx = Some((metadata.time, &payment.id));
+								}
+								true
+							} else {
+								false
+							};
+						if !have_metadata {
+							new_txn.push((payment.amount, &payment.id));
+							inner_ref.tx_metadata.insert(payment_id, TxMetadata {
+								ty: TxType::Payment {
+									ty: PaymentType::IncomingLightning {},
+								},
+								time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
+							});
+						}
+					}
+					if inner_ref.custodial.get_balance() > inner_ref.tunables.custodial_balance_limit {
+						new_txn.sort_unstable();
+						let victim_id = new_txn.first().map(|(_, id)| *id).unwrap_or_else(|| {
+							// Should only happen due to races settling balance, pick the latest.
+							latest_tx.expect("We cannot have a balance if we have no transactions").1
+						});
+						Self::do_custodial_rebalance(&inner_ref, PaymentId::Custodial(victim_id.clone())).await;
+					}
+				}
+				tokio::time::sleep(Duration::from_secs(1)).await;
+			}
+		});
+
 		// TODO: events from ldk-node up
 		Ok(Wallet { inner })
 	}
 
-	fn init_custodial_rebalance(&self, triggering_transaction_id: PaymentId) {
-		let inner = Arc::clone(&self.inner);
-		tokio::spawn(async move {
-			let lightning_receivable = inner.ln_wallet.estimate_receivable_balance();
-			let custodial_balance = inner.custodial.get_balance();
-			let transfer_amt = cmp::min(lightning_receivable, custodial_balance);
-			if transfer_amt > inner.tunables.rebalance_min {
-				if let Ok(inv) = inner.ln_wallet.get_bolt11_invoice(Some(transfer_amt)).await {
-					//TODO: Drop this once ldk-node upgrades to 0.1
-					let inv_str = inv.to_string();
-					use std::str::FromStr;
-					let inv = lightning_invoice::Bolt11Invoice::from_str(&inv_str).unwrap();
-					let expected_hash = *inv.payment_hash();
-					if let Ok(rebalance_id) = inner.custodial.pay(&PaymentMethod::LightningBolt11(inv), transfer_amt).await {
-						let mut received_payment_id = None;
-						for payment in inner.ln_wallet.list_payments() {
-							if let LightningPaymentKind::Bolt11 { hash, .. } = payment.kind {
-								if &hash.0[..] == &expected_hash[..] {
-									received_payment_id = Some(payment.id);
-									break;
-								}
+	async fn do_custodial_rebalance(inner: &Arc<WalletImpl>, triggering_transaction_id: PaymentId) {
+		let lightning_receivable = inner.ln_wallet.estimate_receivable_balance();
+		let custodial_balance = inner.custodial.get_balance();
+		let transfer_amt = cmp::min(lightning_receivable, custodial_balance);
+		if transfer_amt > inner.tunables.rebalance_min {
+			if let Ok(inv) = inner.ln_wallet.get_bolt11_invoice(Some(transfer_amt)).await {
+				//TODO: Drop this once ldk-node upgrades to 0.1
+				let inv_str = inv.to_string();
+				use std::str::FromStr;
+				let inv = lightning_invoice::Bolt11Invoice::from_str(&inv_str).unwrap();
+				let expected_hash = *inv.payment_hash();
+				if let Ok(rebalance_id) = inner.custodial.pay(&PaymentMethod::LightningBolt11(inv), transfer_amt).await {
+					let mut received_payment_id = None;
+					for payment in inner.ln_wallet.list_payments() {
+						if let LightningPaymentKind::Bolt11 { hash, .. } = payment.kind {
+							if &hash.0[..] == &expected_hash[..] {
+								received_payment_id = Some(payment.id);
+								break;
 							}
 						}
-						debug_assert!(received_payment_id.is_some());
-						inner.tx_metadata.insert(PaymentId::Custodial(rebalance_id.clone()), TxMetadata {
-							ty: TxType::TransferToNonCustodial {
-								custodial_payment: rebalance_id,
-								lightning_payment: received_payment_id.map(|id| id.0).unwrap_or([0; 32]),
-								payment_triggering_transfer: triggering_transaction_id,
-							},
-							time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
-						});
 					}
+					debug_assert!(received_payment_id.is_some());
+					inner.tx_metadata.insert(PaymentId::Custodial(rebalance_id.clone()), TxMetadata {
+						ty: TxType::TransferToNonCustodial {
+							custodial_payment: rebalance_id,
+							lightning_payment: received_payment_id.map(|id| id.0).unwrap_or([0; 32]),
+							payment_triggering_transfer: triggering_transaction_id,
+						},
+						time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
+					});
 				}
 			}
-		});
+		}
 	}
 
 	/// Lists the transactions which have been made.
@@ -523,7 +560,10 @@ eprintln!("tx id {}", payment.id);
 									ty: TxType::Payment { ty: ty() },
 									time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
 								});
-								self.init_custodial_rebalance(PaymentId::Lightning(id.0));
+								let inner_ref = Arc::clone(&self.inner);
+								tokio::spawn(async move {
+									Self::do_custodial_rebalance(&inner_ref, PaymentId::Lightning(id.0)).await
+								});
 								return Ok(());
 							},
 							Err(e) => last_lightning_err = Some(e.into()),
