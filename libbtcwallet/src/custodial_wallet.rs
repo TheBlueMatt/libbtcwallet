@@ -126,7 +126,7 @@ impl CustodialWalletInterface for SparkWallet {
 	}
 	fn list_payments(&self) -> impl Future<Output = Result<Vec<Payment>, Error>> + Send {
 		async move {
-			let our_pk = self.spark_wallet.get_spark_address().await?;
+			let our_pk = self.spark_wallet.get_spark_address()?;
 			let transfers = self.spark_wallet.get_all_transfers(None, None).await?.transfers;
 			let mut res = Vec::with_capacity(transfers.len());
 			for transfer in transfers {
