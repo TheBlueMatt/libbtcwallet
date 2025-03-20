@@ -114,9 +114,18 @@ impl LightningWallet {
 		// TODO: `receive_via_jit_channel` should not use the jit channel if there's enough balance
 		// on the non-JIT channel, but we should check that (in the spec/impl?)
 		let inv_str = if let Some(amt) = amount {
-			self.ldk_node.bolt11_payment().receive_via_jit_channel(amt.msats(), "", 86400, None)
+			if self.estimate_receivable_balance() >= amt {
+				self.ldk_node.bolt11_payment().receive(amt.msats(), "", 86400)
+			} else {
+				self.ldk_node.bolt11_payment().receive_via_jit_channel(amt.msats(), "", 86400, None)
+			}
 		} else {
-			self.ldk_node.bolt11_payment().receive_variable_amount_via_jit_channel("", 86400, None)
+			const RECEIVABLE_MIN: Amount = Amount::from_sats(100_000);
+			if self.estimate_receivable_balance() >= RECEIVABLE_MIN {
+				self.ldk_node.bolt11_payment().receive_variable_amount("", 86400)
+			} else {
+				self.ldk_node.bolt11_payment().receive_variable_amount_via_jit_channel("", 86400, None)
+			}
 		}?.to_string();
 		// TODO: Drop this once ldk-node upgrades to 0.1
 		use std::str::FromStr;
