@@ -66,6 +66,13 @@ impl Amount {
 		}
 	}
 
+	/// Subtracts an [`Amount`] from this [`Amount`], saturating to avoid underflowing.
+	#[inline]
+	pub fn saturating_sub(self, rhs: Amount) -> Amount {
+		Amount(self.0.saturating_sub(rhs.0))
+	}
+
+
 	/// Returns an object that implements [`core::fmt::Display`] which writes out the amount, in
 	/// bitcoin, with a decimal point between the whole-bitcoin and partial-bitcoin amounts, with
 	/// any milli-satoshis rounded up to the next whole satoshi.

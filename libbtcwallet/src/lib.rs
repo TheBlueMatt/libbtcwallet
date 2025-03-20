@@ -277,7 +277,10 @@ impl Wallet {
 	async fn do_custodial_rebalance(inner: &Arc<WalletImpl>, triggering_transaction_id: PaymentId) {
 		let lightning_receivable = inner.ln_wallet.estimate_receivable_balance();
 		let custodial_balance = inner.custodial.get_balance();
-		let transfer_amt = cmp::min(lightning_receivable, custodial_balance);
+		let mut transfer_amt = cmp::min(lightning_receivable, custodial_balance);
+		if custodial_balance.saturating_sub(transfer_amt) > inner.tunables.custodial_balance_limit {
+			transfer_amt = custodial_balance;
+		}
 		if transfer_amt > inner.tunables.rebalance_min {
 			if let Ok(inv) = inner.ln_wallet.get_bolt11_invoice(Some(transfer_amt)).await {
 				//TODO: Drop this once ldk-node upgrades to 0.1
