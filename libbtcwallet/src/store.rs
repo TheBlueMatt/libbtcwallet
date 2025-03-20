@@ -140,10 +140,10 @@ impl_writeable_tlv_based_enum!(TxType,
 
 #[derive(Debug)]
 pub(crate) struct TxMetadata {
-	// TODO: TIME
+	pub(crate) time: Duration,
 	pub(crate) ty: TxType,
 }
-impl_writeable_tlv_based!(TxMetadata, { (0, ty, required) });
+impl_writeable_tlv_based!(TxMetadata, { (0, ty, required), (2, time, required) });
 
 pub(crate) struct TxMetadataStore {
 	tx_metadata: RwLock<HashMap<PaymentId, TxMetadata>>,

@@ -31,7 +31,7 @@ use tokio::runtime::Runtime;
 use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use std::sync::Arc;
 
 mod custodial_wallet;
@@ -259,6 +259,7 @@ impl Wallet {
 								lightning_payment: received_payment_id.map(|id| id.0).unwrap_or([0; 32]),
 								payment_triggering_transfer: triggering_transaction_id,
 							},
+							time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
 						});
 					}
 				}
@@ -499,6 +500,7 @@ eprintln!("tx id {}", payment.id);
 							Ok(id) => {
 								self.inner.tx_metadata.insert(PaymentId::Custodial(id), TxMetadata {
 									ty: TxType::Payment { ty: ty() },
+									time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
 								});
 								return Ok(());
 							},
@@ -519,6 +521,7 @@ eprintln!("tx id {}", payment.id);
 							Ok(id) => {
 								self.inner.tx_metadata.insert(PaymentId::Lightning(id.0), TxMetadata {
 									ty: TxType::Payment { ty: ty() },
+									time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
 								});
 								self.init_custodial_rebalance(PaymentId::Lightning(id.0));
 								return Ok(());
