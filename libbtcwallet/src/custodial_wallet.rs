@@ -6,11 +6,10 @@ use ldk_node::bitcoin::Network;
 use ldk_node::bitcoin::io;
 use ldk_node::lightning::ln::msgs::DecodeError;
 use ldk_node::lightning::util::ser::{Readable, Writeable, Writer};
+use ldk_node::lightning_invoice::Bolt11Invoice;
 
 use bitcoin_payment_instructions::PaymentMethod;
 use bitcoin_payment_instructions::amount::Amount;
-
-use lightning_invoice::Bolt11Invoice; // TODO: Re-export this from `lightning`
 
 use spark_rust::{SparkSdk, SparkNetwork};
 use spark_rust::error::SparkSdkError;
@@ -124,10 +123,7 @@ impl CustodialWalletInterface for SparkWallet {
 	fn get_bolt11_invoice(&self, amount: Option<Amount>) -> impl Future<Output = Result<Bolt11Invoice, Error>> + Send {
 		async move {
 			// TODO: get upstream to let us be amount-less
-			let inv = self.spark_wallet.create_lightning_invoice(amount.unwrap_or(Amount::from_sats(0)).sats_rounding_up(), None, None).await?;
-			// TODO: Drop once ldk-node upgrades to ldk 0.1
-			use std::str::FromStr;
-			Ok(Bolt11Invoice::from_str(&inv.to_string()).unwrap())
+			self.spark_wallet.create_lightning_invoice(amount.unwrap_or(Amount::from_sats(0)).sats_rounding_up(), None, None).await
 		}
 	}
 	fn list_payments(&self) -> impl Future<Output = Result<Vec<Payment>, Error>> + Send {

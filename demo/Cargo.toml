@@ -12,4 +12,4 @@ edition = "2021"
 bitcoin-payment-instructions = { path = "../bitcoin-payment-instructions" }
 libbtcwallet = { path = "../libbtcwallet" }
 tokio = { version = "1.0", default-features = false, features = ["rt-multi-thread"] }
-ldk-node = { version = "0.4", default-features = false }
+ldk-node = { git = "https://github.com/lightningdevkit/ldk-node", default-features = false }

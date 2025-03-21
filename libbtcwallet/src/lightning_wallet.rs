@@ -8,8 +8,7 @@ use ldk_node::bitcoin::{Address, Network};
 use ldk_node::payment::{PaymentDetails, PaymentDirection, PaymentStatus, PaymentKind};
 use ldk_node::lightning::ln::channelmanager::PaymentId;
 use ldk_node::lightning::util::persist::KVStore;
-
-use lightning_invoice::Bolt11Invoice; // TODO: Re-export this from `lightning`
+use ldk_node::lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description};
 
 use std::sync::Arc;
 
@@ -48,10 +47,10 @@ impl From<&PaymentDetails> for PaymentType {
 					payment_preimage: *preimage,
 				}
 			},
-			(PaymentKind::Onchain, true) => {
+			(PaymentKind::Onchain { .. }, true) => {
 				PaymentType::OutgoingOnChain {}
 			}
-			(PaymentKind::Onchain, false) => {
+			(PaymentKind::Onchain { .. }, false) => {
 				PaymentType::IncomingOnChain {}
 			},
 			(_, false) => {
@@ -73,14 +72,14 @@ impl LightningWallet {
 	pub(super) fn init(runtime: Arc<Runtime>, config: WalletConfig, store: Arc<dyn KVStore + Sync + Send>) -> Result<Self, InitFailure> {
 		let mut builder = ldk_node::Builder::new();
 		builder.set_network(config.network);
-		builder.set_entropy_seed_bytes(config.seed.to_vec())?;
+		builder.set_entropy_seed_bytes(config.seed);
 		if config.network == Network::Testnet {
 			// TODO: For now!
 			builder.set_gossip_source_rgs("https://rapidsync.lightningdevkit.org/testnet/snapshot".to_string());
 		} else {
 			builder.set_gossip_source_rgs("https://rapidsync.lightningdevkit.org/snapshot".to_string());
 		}
-		builder.set_liquidity_source_lsps2(config.lsp.0, config.lsp.1, config.lsp.2);
+		builder.set_liquidity_source_lsps2(config.lsp.1, config.lsp.0, config.lsp.2);
 		match config.chain_source {
 			ChainSource::Esplora(url) => builder.set_chain_source_esplora(url, None),
 			ChainSource::BitcoindRPC { host, port, user, password } =>
@@ -106,6 +105,7 @@ impl LightningWallet {
 					Event::PaymentReceived { .. } => {
 						let _ = payment_receipt_sender.send(());
 					},
+					Event::PaymentForwarded { .. } => {},
 					Event::PaymentClaimable { .. } => {},
 					Event::ChannelPending { .. } => {},
 					Event::ChannelReady { .. } => {},
@@ -133,24 +133,21 @@ impl LightningWallet {
 	pub(crate) async fn get_bolt11_invoice(&self, amount: Option<Amount>) -> Result<Bolt11Invoice, NodeError> {
 		// TODO: `receive_via_jit_channel` should not use the jit channel if there's enough balance
 		// on the non-JIT channel, but we should check that (in the spec/impl?)
-		let inv_str = if let Some(amt) = amount {
+		let desc = Bolt11InvoiceDescription::Direct(Description::empty());
+		if let Some(amt) = amount {
 			if self.estimate_receivable_balance() >= amt {
-				self.inner.ldk_node.bolt11_payment().receive(amt.msats(), "", 86400)
+				self.inner.ldk_node.bolt11_payment().receive(amt.msats(), &desc, 86400)
 			} else {
-				self.inner.ldk_node.bolt11_payment().receive_via_jit_channel(amt.msats(), "", 86400, None)
+				self.inner.ldk_node.bolt11_payment().receive_via_jit_channel(amt.msats(), &desc, 86400, None)
 			}
 		} else {
 			const RECEIVABLE_MIN: Amount = Amount::from_sats(100_000);
 			if self.estimate_receivable_balance() >= RECEIVABLE_MIN {
-				self.inner.ldk_node.bolt11_payment().receive_variable_amount("", 86400)
+				self.inner.ldk_node.bolt11_payment().receive_variable_amount(&desc, 86400)
 			} else {
-				self.inner.ldk_node.bolt11_payment().receive_variable_amount_via_jit_channel("", 86400, None)
+				self.inner.ldk_node.bolt11_payment().receive_variable_amount_via_jit_channel(&desc, 86400, None)
 			}
-		}?.to_string();
-		// TODO: Drop this once ldk-node upgrades to 0.1
-		use std::str::FromStr;
-		let inv = Bolt11Invoice::from_str(&inv_str).unwrap();
-		Ok(inv)
+		}
 	}
 
 	pub(crate) fn list_payments(&self) -> Vec<PaymentDetails> {
@@ -178,22 +175,15 @@ impl LightningWallet {
 	}
 
 	pub(crate) async fn pay(&self, method: &PaymentMethod, amount: Amount) -> Result<PaymentId, NodeError> {
-		use std::str::FromStr; // TODO: Drop this once ldk-node upgrades to 0.1
 		match method {
-			PaymentMethod::LightningBolt11(invoice) => {
-				// TODO: Drop this once ldk-node upgrades to 0.1
-				let inv_str = invoice.to_string();
-				let inv = ldk_node::lightning_invoice::Bolt11Invoice::from_str(&inv_str).unwrap();
+			PaymentMethod::LightningBolt11(inv) => {
 				self.inner.ldk_node.bolt11_payment().send_using_amount(&inv, amount.msats(), None)
 			},
 			PaymentMethod::LightningBolt12(offer) => {
-				// TODO: Drop this once ldk-node upgrades to 0.1
-				let offer_str = offer.to_string();
-				let off = ldk_node::lightning::offers::offer::Offer::from_str(&offer_str).unwrap();
-				self.inner.ldk_node.bolt12_payment().send_using_amount(&off, amount.msats(), None, None)
+				self.inner.ldk_node.bolt12_payment().send_using_amount(&offer, amount.msats(), None, None)
 			},
 			PaymentMethod::OnChain { address, amount: _ } => {
-				self.inner.ldk_node.onchain_payment().send_to_address(address, amount.sats_rounding_up())
+				self.inner.ldk_node.onchain_payment().send_to_address(address, amount.sats_rounding_up(), None)
 					.map(|txid| PaymentId(*txid.as_ref()))
 			},
 		}
