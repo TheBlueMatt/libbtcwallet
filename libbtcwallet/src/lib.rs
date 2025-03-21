@@ -414,6 +414,7 @@ eprintln!("tx id {}", payment.id);
 			}
 		}
 		for payment in lightning_payments {
+			use ldk_node::payment::PaymentDirection;
 			if let Some(tx_metadata) = tx_metadata.get(&PaymentId::Lightning(payment.id.0)) {
 				match &tx_metadata.ty {
 					TxType::TransferToNonCustodial { custodial_payment: _, lightning_payment, payment_triggering_transfer } => {
@@ -438,10 +439,10 @@ eprintln!("tx id {}", payment.id);
 								transaction: None,
 							});
 						debug_assert!(entry.transaction.is_none());
-						debug_assert!(payment.direction == ldk_node::payment::PaymentDirection::Outbound);
+						debug_assert!(payment.direction == PaymentDirection::Outbound);
 						entry.transaction = Some(Transaction {
 							status: payment.status.into(),
-							outbound: payment.direction == ldk_node::payment::PaymentDirection::Outbound,
+							outbound: payment.direction == PaymentDirection::Outbound,
 							amount: Amount::from_milli_sats(payment.amount_msat.unwrap_or(0)), // TODO: when can this be none https://github.com/lightningdevkit/ldk-node/issues/495
 							fee: Amount::from_milli_sats(0), // TODO: https://github.com/lightningdevkit/ldk-node/issues/494
 							payment_type: (&payment).into(),
@@ -449,10 +450,9 @@ eprintln!("tx id {}", payment.id);
 						});
 					},
 					TxType::Payment { ty: _ } => {
-						debug_assert!(false); // Shouldn't even have an entry
 						res.push(Transaction {
 							status: payment.status.into(),
-							outbound: payment.direction == ldk_node::payment::PaymentDirection::Outbound,
+							outbound: payment.direction == PaymentDirection::Outbound,
 							amount: Amount::from_milli_sats(payment.amount_msat.unwrap_or(0)), // TODO: when can this be none https://github.com/lightningdevkit/ldk-node/issues/495
 							fee: Amount::from_milli_sats(0), // TODO: https://github.com/lightningdevkit/ldk-node/issues/494
 							payment_type: (&payment).into(),
@@ -461,9 +461,10 @@ eprintln!("tx id {}", payment.id);
 					},
 				}
 			} else {
+				debug_assert_ne!(payment.direction, PaymentDirection::Outbound, "Missing outbound lightning payment metadata entry on {}", payment.id);
 				res.push(Transaction {
 					status: payment.status.into(),
-					outbound: payment.direction == ldk_node::payment::PaymentDirection::Outbound,
+					outbound: payment.direction == PaymentDirection::Outbound,
 					amount: Amount::from_milli_sats(payment.amount_msat.unwrap_or(0)), // TODO: when can this be none https://github.com/lightningdevkit/ldk-node/issues/495
 					fee: Amount::from_milli_sats(0), // TODO: https://github.com/lightningdevkit/ldk-node/issues/494
 					payment_type: (&payment).into(),

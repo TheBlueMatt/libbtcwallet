@@ -126,9 +126,11 @@ pub(crate) enum TxType {
 		payment_triggering_transfer: PaymentId,
 	},
 	PaymentTriggeringTransferToNonCustodial {
+		// TODO: We should remove `ty` once we get the info we need from the custodial end
 		ty: PaymentType,
 	},
 	Payment {
+		// TODO: We should remove `ty` once we get the info we need from the custodial end
 		ty: PaymentType,
 	},
 }
@@ -144,6 +146,7 @@ impl_writeable_tlv_based_enum!(TxType,
 
 #[derive(Clone, Debug)]
 pub(crate) struct TxMetadata {
+	// TODO: We should remove `time` once we get the info we need from the custodial end
 	pub(crate) time: Duration,
 	pub(crate) ty: TxType,
 }
