@@ -9,8 +9,9 @@ use ldk_node::bitcoin::{Address, Network};
 use ldk_node::payment::{PaymentDetails, PaymentDirection, PaymentStatus, PaymentKind};
 use ldk_node::lightning::ln::channelmanager::PaymentId;
 use ldk_node::lightning::util::persist::KVStore;
+use ldk_node::lightning::log_debug;
+use ldk_node::lightning::util::logger::Logger as _;
 use ldk_node::lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description};
-use ldk_node::logger::LogWriter;
 
 use std::sync::Arc;
 
@@ -91,7 +92,7 @@ impl LightningWallet {
 				builder.set_chain_source_bitcoind_rpc(host, port, user, password),
 		};
 
-		builder.set_custom_logger(logger as Arc<dyn LogWriter>);
+		builder.set_custom_logger(Arc::clone(&logger) as Arc<dyn ldk_node::logger::LogWriter>);
 
 		let ldk_node = builder.build_with_store(store)?;
 		let (payment_receipt_sender, payment_receipt_flag) = watch::channel(());
@@ -106,6 +107,7 @@ impl LightningWallet {
 		runtime.spawn(async move {
 			loop {
 				let event = events_ref.ldk_node.next_event_async().await;
+				log_debug!(logger, "Got ldk-node event {:?}", event);
 				match event {
 					Event::PaymentSuccessful { .. } => {},
 					Event::PaymentFailed { .. } => {},

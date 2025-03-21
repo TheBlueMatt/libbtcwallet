@@ -24,7 +24,9 @@ use ldk_node::{BuildError, NodeError};
 use ldk_node::payment::PaymentKind as LightningPaymentKind;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::util::persist::KVStore;
+use ldk_node::lightning::{log_info, log_debug};
 use ldk_node::io::sqlite_store::SqliteStore;
+use ldk_node::lightning::util::logger::Logger as _;
 
 use tokio::runtime::Runtime;
 
@@ -261,6 +263,7 @@ impl Wallet {
 								false
 							};
 						if !have_metadata {
+							log_info!(inner_ref.logger, "Received new custodial payment with id {}", payment.id);
 							new_txn.push((payment.amount, &payment.id));
 							inner_ref.tx_metadata.insert(payment_id, TxMetadata {
 								ty: TxType::Payment {
@@ -308,47 +311,53 @@ inner_ref.custodial.sync().await; // TODO: Remote this when spark fixes their sh
 
 	async fn do_custodial_rebalance(inner: &Arc<WalletImpl>, triggering_transaction_id: PaymentId) {
 		let _lock = inner.balance_mutex.lock().await;
+		log_info!(inner.logger, "Initiating rebalance, assigning fees to {}", triggering_transaction_id);
+
 		if let Some(transfer_amt) = Self::get_balance_amt(inner) {
 			if let Ok(inv) = inner.ln_wallet.get_bolt11_invoice(Some(transfer_amt)).await {
-				//TODO: Drop this once ldk-node upgrades to 0.1
-				let inv_str = inv.to_string();
-				use std::str::FromStr;
-				let inv = lightning_invoice::Bolt11Invoice::from_str(&inv_str).unwrap();
+				log_debug!(inner.logger, "Attempting to pay invoice {} to rebalance for {:?}", inv, transfer_amt);
 				let expected_hash = *inv.payment_hash();
-				if let Ok(rebalance_id) = inner.custodial.pay(&PaymentMethod::LightningBolt11(inv), transfer_amt).await {
-					let mut received_payment_id = None;
-					while received_payment_id.is_none() {
-						for payment in inner.ln_wallet.list_payments() {
-							if let LightningPaymentKind::Bolt11 { hash, .. } = payment.kind {
-								if &hash.0[..] == &expected_hash[..] {
-									match payment.status.into() {
-										TxStatus::Completed => {
-											received_payment_id = Some(payment.id);
-										},
-										TxStatus::Pending => {},
-										TxStatus::Failed => return,
+				match inner.custodial.pay(&PaymentMethod::LightningBolt11(inv), transfer_amt).await {
+					Ok(rebalance_id) => {
+						log_debug!(inner.logger, "Rebalance custodial transaction initiated, id {}. Waiting for LN payment.", rebalance_id);
+						let mut received_payment_id = None;
+						while received_payment_id.is_none() {
+							for payment in inner.ln_wallet.list_payments() {
+								if let LightningPaymentKind::Bolt11 { hash, .. } = payment.kind {
+									if &hash.0[..] == &expected_hash[..] {
+										match payment.status.into() {
+											TxStatus::Completed => {
+												received_payment_id = Some(payment.id);
+											},
+											TxStatus::Pending => {},
+											TxStatus::Failed => return,
+										}
+										break;
 									}
-									break;
 								}
 							}
+							if received_payment_id.is_none() {
+								inner.ln_wallet.await_payment_receipt().await;
+							}
 						}
-						if received_payment_id.is_none() {
-							inner.ln_wallet.await_payment_receipt().await;
-						}
-					}
-					let lightning_id = received_payment_id.map(|id| id.0).unwrap_or([0; 32]);
-					inner.tx_metadata.set_tx_caused_rebalance(&triggering_transaction_id)
-						.expect("TODO: This is race-y, we really need some kind of mutex on custodial rebalances happening");
-					let metadata = TxMetadata {
-						ty: TxType::TransferToNonCustodial {
-							custodial_payment: rebalance_id.clone(),
-							lightning_payment: lightning_id.clone(),
-							payment_triggering_transfer: triggering_transaction_id,
-						},
-						time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
-					};
-					inner.tx_metadata.insert(PaymentId::Custodial(rebalance_id), metadata.clone());
-					inner.tx_metadata.insert(PaymentId::Lightning(lightning_id), metadata.clone());
+						let lightning_id = received_payment_id.map(|id| id.0).unwrap_or([0; 32]);
+						log_info!(inner.logger, "Rebalance succeeded. Assigned fees to {} for custodial tx {} and lightning tx {}", triggering_transaction_id, rebalance_id, PaymentId::Lightning(lightning_id));
+						inner.tx_metadata.set_tx_caused_rebalance(&triggering_transaction_id)
+							.expect("TODO: This is race-y, we really need some kind of mutex on custodial rebalances happening");
+						let metadata = TxMetadata {
+							ty: TxType::TransferToNonCustodial {
+								custodial_payment: rebalance_id.clone(),
+								lightning_payment: lightning_id.clone(),
+								payment_triggering_transfer: triggering_transaction_id,
+							},
+							time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
+						};
+						inner.tx_metadata.insert(PaymentId::Custodial(rebalance_id), metadata.clone());
+						inner.tx_metadata.insert(PaymentId::Lightning(lightning_id), metadata.clone());
+					},
+					Err(e) => {
+						log_info!(inner.logger, "Rebalance custodial transaction failed with {:?}", e);
+					},
 				}
 			}
 		}
@@ -417,9 +426,9 @@ inner_ref.custodial.sync().await; // TODO: Remote this when spark fixes their sh
 					},
 				}
 			} else {
-eprintln!("txn list {:?}", tx_metadata);
-eprintln!("tx id {}", payment.id);
-				debug_assert!(false);
+// Apparently this can currently happen due to spark-internal transfers
+continue;
+				debug_assert!(false, "Missing custodial payment {}", payment.id);
 			}
 		}
 		for payment in lightning_payments {
@@ -501,6 +510,7 @@ eprintln!("tx id {}", payment.id);
 	pub async fn get_balance(&self) -> Balances {
 		let custodial_balance = self.inner.custodial.get_balance();
 		let (available_ln, pending_balance) = self.inner.ln_wallet.get_balance();
+		log_debug!(self.inner.logger, "Have custodial balance of {:?}, lightning available balance of {:?}", custodial_balance, available_ln);
 		Balances {
 			available_balance: available_ln.saturating_add(custodial_balance),
 			pending_balance,
