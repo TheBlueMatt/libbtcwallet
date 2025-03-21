@@ -1,4 +1,5 @@
 use crate::{ChainSource, InitFailure, WalletConfig, TxStatus, PaymentType};
+use crate::logging::Logger;
 
 use bitcoin_payment_instructions::PaymentMethod;
 use bitcoin_payment_instructions::amount::Amount;
@@ -9,6 +10,7 @@ use ldk_node::payment::{PaymentDetails, PaymentDirection, PaymentStatus, Payment
 use ldk_node::lightning::ln::channelmanager::PaymentId;
 use ldk_node::lightning::util::persist::KVStore;
 use ldk_node::lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description};
+use ldk_node::logger::LogWriter;
 
 use std::sync::Arc;
 
@@ -69,7 +71,10 @@ pub(crate) struct LightningWallet {
 }
 
 impl LightningWallet {
-	pub(super) fn init(runtime: Arc<Runtime>, config: WalletConfig, store: Arc<dyn KVStore + Sync + Send>) -> Result<Self, InitFailure> {
+	pub(super) fn init(
+		runtime: Arc<Runtime>, config: WalletConfig, store: Arc<dyn KVStore + Sync + Send>,
+		logger: Arc<Logger>,
+	) -> Result<Self, InitFailure> {
 		let mut builder = ldk_node::Builder::new();
 		builder.set_network(config.network);
 		builder.set_entropy_seed_bytes(config.seed);
@@ -85,6 +90,8 @@ impl LightningWallet {
 			ChainSource::BitcoindRPC { host, port, user, password } =>
 				builder.set_chain_source_bitcoind_rpc(host, port, user, password),
 		};
+
+		builder.set_custom_logger(logger as Arc<dyn LogWriter>);
 
 		let ldk_node = builder.build_with_store(store)?;
 		let (payment_receipt_sender, payment_receipt_flag) = watch::channel(());

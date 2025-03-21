@@ -1,4 +1,5 @@
 use crate::{InitFailure, WalletConfig, TxStatus};
+use crate::logging::Logger;
 
 use ldk_node::bitcoin::hashes::sha256::Hash as Sha256;
 use ldk_node::bitcoin::hashes::Hash;
@@ -22,7 +23,6 @@ use std::future::Future;
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Clone, Hash, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct CustodialPaymentId(uuid::Uuid);
@@ -70,7 +70,7 @@ impl From<TransferStatus> for TxStatus {
 }
 
 pub(crate) trait CustodialWalletInterface: Sized {
-	fn init(config: &WalletConfig) -> impl Future<Output = Result<Self, InitFailure>> + Send;
+	fn init(config: &WalletConfig, logger: Arc<Logger>) -> impl Future<Output = Result<Self, InitFailure>> + Send;
 	fn get_balance(&self) -> Amount;
 	fn get_reusable_receive_uri(&self) -> impl Future<Output = Result<String, Error>> + Send;
 	fn get_bolt11_invoice(&self, amount: Option<Amount>) -> impl Future<Output = Result<Bolt11Invoice, Error>> + Send;
@@ -81,6 +81,7 @@ pub(crate) trait CustodialWalletInterface: Sized {
 
 pub(crate) struct SparkWallet {
 	spark_wallet: Arc<SparkSdk>,
+	logger: Arc<Logger>,
 }
 
 impl SparkWallet {
@@ -90,7 +91,7 @@ impl SparkWallet {
 }
 
 impl CustodialWalletInterface for SparkWallet {
-	fn init(config: &WalletConfig) -> impl Future<Output = Result<Self, InitFailure>> + Send {
+	fn init(config: &WalletConfig, logger: Arc<Logger>) -> impl Future<Output = Result<Self, InitFailure>> + Send {
 		async move {
 			let seed = Sha256::hash(&config.seed);
 			let net = match config.network {
@@ -109,7 +110,7 @@ impl CustodialWalletInterface for SparkWallet {
 				}
 			});*/
 
-			Ok(SparkWallet { spark_wallet })
+			Ok(SparkWallet { spark_wallet, logger })
 		}
 	}
 	fn get_balance(&self) -> Amount {

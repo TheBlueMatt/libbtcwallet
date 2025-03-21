@@ -31,16 +31,19 @@ use tokio::runtime::Runtime;
 use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 use std::sync::Arc;
 
 mod custodial_wallet;
 mod lightning_wallet;
 mod store;
+pub(crate) mod logging;
 
 use lightning_wallet::LightningWallet;
 use custodial_wallet::CustodialWalletInterface;
 use custodial_wallet::Error as CustodialError;
+use logging::Logger;
 
 type CustodialWallet = custodial_wallet::SparkWallet;
 
@@ -61,6 +64,7 @@ struct WalletImpl {
 	tx_metadata: TxMetadataStore,
 	balance_mutex: tokio::sync::Mutex<()>,
 	store: Arc<dyn KVStore + Send + Sync>,
+	logger: Arc<Logger>,
 }
 
 pub struct Wallet {
@@ -209,13 +213,17 @@ impl Wallet {
 	pub async fn new(runtime: Arc<Runtime>, config: WalletConfig) -> Result<Wallet, InitFailure> {
 		let tunables = config.tunables;
 		let network = config.network;
-		let store: Arc<dyn KVStore + Send + Sync> = match &config.storage_config {
+		let (store, logger): (Arc<dyn KVStore + Send + Sync>, _) = match &config.storage_config {
 			StorageConfig::LocalSQLite(path) => {
-				Arc::new(SqliteStore::new(path.into(), Some("libbtcwallet.sqlite".to_owned()), None)?)
+				let mut path: PathBuf = path.into();
+				let store = Arc::new(SqliteStore::new(path.clone(), Some("libbtcwallet.sqlite".to_owned()), None)?);
+				path.push("libbtcwallet.log");
+				let logger = Arc::new(Logger::new(&path).expect("Failed to open log file"));
+				(store, logger)
 			},
 		};
-		let custodial = CustodialWallet::init(&config).await?;
-		let ln_wallet = LightningWallet::init(Arc::clone(&runtime), config, Arc::clone(&store))?;
+		let custodial = CustodialWallet::init(&config, Arc::clone(&logger)).await?;
+		let ln_wallet = LightningWallet::init(Arc::clone(&runtime), config, Arc::clone(&store), Arc::clone(&logger))?;
 
 		let inner = Arc::new(WalletImpl {
 			custodial,
@@ -224,6 +232,7 @@ impl Wallet {
 			tunables,
 			tx_metadata: TxMetadataStore::new(Arc::clone(&store)),
 			store,
+			logger,
 			balance_mutex: tokio::sync::Mutex::new(()),
 		});
 
