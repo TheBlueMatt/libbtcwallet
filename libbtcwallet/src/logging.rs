@@ -1,6 +1,6 @@
 use ldk_node::logger::{LogWriter, LogRecord};
 use ldk_node::lightning::util::logger::Logger as LdkLogger;
-use ldk_node::lightning::util::logger::Record;
+use ldk_node::lightning::util::logger::{Level, Record};
 use chrono::Utc;
 use std::path::Path;
 use std::fs;
@@ -19,6 +19,7 @@ impl Logger {
 
 impl LogWriter for Logger {
 	fn log(&self, record: LogRecord) {
+		if record.level == Level::Gossip { return; }
 		let mut file = self.0.lock().unwrap();
 		let mut buffer = BufWriter::new(&mut *file);
 		let _ = write!(&mut buffer,
