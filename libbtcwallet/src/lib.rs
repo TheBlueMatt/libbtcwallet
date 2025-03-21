@@ -517,10 +517,15 @@ eprintln!("tx id {}", payment.id);
 	pub async fn get_single_use_receive_uri(&self, amount: Option<Amount>) -> Result<String, WalletError> {
 		let (enable_onchain, bolt11) = if let Some(amt) = amount {
 			let enable_onchain = amt >= self.inner.tunables.onchain_receive_threshold;
-			let bolt11 = if amt > self.inner.tunables.custodial_balance_limit {
-				self.inner.ln_wallet.get_bolt11_invoice(amount).await?
-			} else {
+			// We always assume lighting balance is an overestimate by `rebalance_min`.
+			let lightning_receivable = self.inner.ln_wallet.estimate_receivable_balance()
+				.saturating_sub(self.inner.tunables.rebalance_min);
+			let use_custodial = amt <= self.inner.tunables.custodial_balance_limit && amt >= lightning_receivable;
+
+			let bolt11 = if use_custodial {
 				self.inner.custodial.get_bolt11_invoice(amount).await?
+			} else {
+				self.inner.ln_wallet.get_bolt11_invoice(amount).await?
 			};
 			(enable_onchain, bolt11)
 		} else {
