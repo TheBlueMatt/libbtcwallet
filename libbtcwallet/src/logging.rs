@@ -1,4 +1,6 @@
 use ldk_node::logger::{LogWriter, LogRecord};
+use ldk_node::lightning::util::logger::Logger as LdkLogger;
+use ldk_node::lightning::util::logger::Record;
 use chrono::Utc;
 use std::path::Path;
 use std::fs;
@@ -27,5 +29,11 @@ impl LogWriter for Logger {
 			record.line,
 			record.args
 		);
+	}
+}
+
+impl LdkLogger for Logger {
+	fn log(&self, record: Record) {
+		LogWriter::log(self, record.into());
 	}
 }
