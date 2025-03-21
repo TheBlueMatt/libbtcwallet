@@ -45,6 +45,7 @@ pub struct Transaction {
 	pub amount: Amount,
 	pub fee: Amount,
 	pub payment_type: PaymentType,
+	pub time_since_epoch: Duration,
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]

@@ -391,6 +391,7 @@ inner_ref.custodial.sync().await; // TODO: Remote this when spark fixes their sh
 							amount: payment.amount,
 							fee: payment.fee,
 							payment_type: ty.clone(),
+							time_since_epoch: tx_metadata.time,
 						});
 					},
 					TxType::Payment { ty } => {
@@ -402,6 +403,7 @@ inner_ref.custodial.sync().await; // TODO: Remote this when spark fixes their sh
 							amount: payment.amount,
 							fee: payment.fee,
 							payment_type: ty.clone(),
+							time_since_epoch: tx_metadata.time,
 						});
 					},
 				}
@@ -443,6 +445,7 @@ eprintln!("tx id {}", payment.id);
 							amount: Amount::from_milli_sats(payment.amount_msat.unwrap_or(0)), // TODO: when can this be none https://github.com/lightningdevkit/ldk-node/issues/495
 							fee: Amount::from_milli_sats(0), // TODO: https://github.com/lightningdevkit/ldk-node/issues/494
 							payment_type: (&payment).into(),
+							time_since_epoch: tx_metadata.time,
 						});
 					},
 					TxType::Payment { ty: _ } => {
@@ -453,6 +456,7 @@ eprintln!("tx id {}", payment.id);
 							amount: Amount::from_milli_sats(payment.amount_msat.unwrap_or(0)), // TODO: when can this be none https://github.com/lightningdevkit/ldk-node/issues/495
 							fee: Amount::from_milli_sats(0), // TODO: https://github.com/lightningdevkit/ldk-node/issues/494
 							payment_type: (&payment).into(),
+							time_since_epoch: tx_metadata.time,
 						})
 					},
 				}
@@ -463,6 +467,7 @@ eprintln!("tx id {}", payment.id);
 					amount: Amount::from_milli_sats(payment.amount_msat.unwrap_or(0)), // TODO: when can this be none https://github.com/lightningdevkit/ldk-node/issues/495
 					fee: Amount::from_milli_sats(0), // TODO: https://github.com/lightningdevkit/ldk-node/issues/494
 					payment_type: (&payment).into(),
+					time_since_epoch: Duration::from_secs(payment.latest_update_timestamp),
 				})
 			}
 		}
@@ -478,6 +483,7 @@ eprintln!("tx id {}", payment.id);
 			}
 		}
 
+		res.sort_by_key(|e| e.time_since_epoch);
 		Ok(res)
 	}
 
