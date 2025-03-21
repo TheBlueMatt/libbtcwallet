@@ -271,6 +271,8 @@ impl Wallet {
 					}
 				}
 				tokio::time::sleep(Duration::from_secs(1)).await;
+
+inner_ref.custodial.sync().await; // TODO: Remote this when spark fixes their shit
 			}
 		});
 

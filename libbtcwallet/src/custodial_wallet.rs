@@ -84,6 +84,12 @@ pub(crate) struct SparkWallet {
 	spark_wallet: Arc<SparkSdk>,
 }
 
+impl SparkWallet {
+	pub(crate) async fn sync(&self) {
+		let _ = self.spark_wallet.sync_wallet().await;
+	}
+}
+
 impl CustodialWalletInterface for SparkWallet {
 	fn init(config: &WalletConfig) -> impl Future<Output = Result<Self, InitFailure>> + Send {
 		async move {
@@ -96,13 +102,13 @@ impl CustodialWalletInterface for SparkWallet {
 			let signer = DefaultSigner::from_master_seed(&seed[..], net).await?;
 			let spark_wallet = Arc::new(SparkSdk::new(net, signer).await?);
 
-			let spark_ref = Arc::clone(&spark_wallet);
+			/*let spark_ref = Arc::clone(&spark_wallet);
 			tokio::spawn(async move {
 				loop {
 					let _ = spark_ref.sync_wallet().await;
 					tokio::time::sleep(Duration::from_secs(30)).await;
 				}
-			});
+			});*/
 
 			Ok(SparkWallet { spark_wallet })
 		}
