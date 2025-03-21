@@ -177,14 +177,22 @@ impl TxMetadataStore {
 		self.tx_metadata.read().unwrap()
 	}
 
-	pub fn insert(&self, key: PaymentId, value: TxMetadata) {
+	fn do_set(&self, key: PaymentId, value: TxMetadata) -> bool {
 		let mut tx_metadata = self.tx_metadata.write().unwrap();
 		let key_str = key.to_string();
 		let ser = value.encode();
 		let old = tx_metadata.insert(key, value);
-		debug_assert!(old.is_none());
 		self.store.write(STORE_PRIMARY_KEY, STORE_SECONDARY_KEY, &key_str, &ser)
 			.expect("We do not allow writes to fail");
+		old.is_some()
+	}
+	pub fn upsert(&self, key: PaymentId, value: TxMetadata) {
+		self.do_set(key, value);
+	}
+
+	pub fn insert(&self, key: PaymentId, value: TxMetadata) {
+		let had_old = self.do_set(key, value);
+		debug_assert!(!had_old);
 	}
 
 	pub fn set_tx_caused_rebalance(&self, payment_id: &PaymentId) -> Result<(), ()> {

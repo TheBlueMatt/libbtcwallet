@@ -608,7 +608,10 @@ eprintln!("tx id {}", payment.id);
 						let res = self.inner.ln_wallet.pay(method, instructions.0.1).await;
 						match res {
 							Ok(id) => {
-								self.inner.tx_metadata.insert(PaymentId::Lightning(id.0), TxMetadata {
+								// Note that the Payment Id can be repeated if we make a payment,
+								// it fails, then we attempt to pay the same (BOLT 11) invoice
+								// again.
+								self.inner.tx_metadata.upsert(PaymentId::Lightning(id.0), TxMetadata {
 									ty: TxType::Payment { ty: ty() },
 									time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap(),
 								});
