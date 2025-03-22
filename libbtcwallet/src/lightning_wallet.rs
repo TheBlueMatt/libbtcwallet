@@ -76,7 +76,11 @@ impl LightningWallet {
 		runtime: Arc<Runtime>, config: WalletConfig, store: Arc<dyn KVStore + Sync + Send>,
 		logger: Arc<Logger>,
 	) -> Result<Self, InitFailure> {
-		let mut builder = ldk_node::Builder::new();
+		let mut ldk_node_config = ldk_node::config::Config::default();
+		let mut anchor_channels_config = ldk_node::config::AnchorChannelsConfig::default();
+		anchor_channels_config.trusted_peers_no_reserve =  vec![config.lsp.1];
+		ldk_node_config.anchor_channels_config = Some(anchor_channels_config);
+		let mut builder = ldk_node::Builder::from_config(ldk_node_config);
 		builder.set_network(config.network);
 		builder.set_entropy_seed_bytes(config.seed);
 		if config.network == Network::Testnet {
