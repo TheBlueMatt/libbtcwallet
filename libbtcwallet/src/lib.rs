@@ -613,7 +613,10 @@ continue;
 								});
 								return Ok(());
 							},
-							Err(e) => last_custodial_err = Some(e.into()),
+							Err(e) => {
+								log_debug!(self.inner.logger, "Custodial payment failed with {:?}", e);
+								last_custodial_err = Some(e.into())
+							},
 						}
 					}
 				}
@@ -641,7 +644,10 @@ continue;
 								});
 								return Ok(());
 							},
-							Err(e) => last_lightning_err = Some(e.into()),
+							Err(e) => {
+								log_debug!(self.inner.logger, "LN payment failed with {:?}", e);
+								last_lightning_err = Some(e.into())
+							},
 						}
 					}
 				}
