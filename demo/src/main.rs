@@ -15,15 +15,11 @@ fn main() {
 		let mut seed = [0; 64];
 		seed.copy_from_slice(&Vec::<u8>::from_hex("PUT 64 bytes here").unwrap()[..]);
 
-		//let lsp = ("0264a62a4307d701c04a46994ce5f5323b1ca28c80c66b73c631dbcb0990d6e835", "46.105.57.11:9735");
-		//let lsp = ("0288be11d147e1525f7f234f304b094d6627d2c70f3313d7ba3696887b261c4447", "18.219.93.203:9735");
-		//let lsp = ("02a7311555b28f6851698999c8045de5dd3a355feae444e6ca1300bb52cceb1e7b", "88.99.184.172:9735");
-		//let lsp = ("02cad4ec4c8b0dc2c7035a1898f979c8c7169bdff74e01ad6ca7aea59d85c59e8b", "159.69.32.62:20757");
-		let lsp = ("0370a5392cd7c81ff5128fa656ee6db0c4d11c778fcd6cb98cb6ba3b48394f5705", "192.243.215.101:26000");
+		let lsp = ("021deaa26ce6bb7cc63bd30e83a2bba1c0368269fa3bb9b616a24f40d941ac7d32", "69.59.18.144:9735");
 
 		let config = WalletConfig {
 			storage_config: StorageConfig::LocalSQLite("/home/matt/demo-wallet/".to_owned()),
-			chain_source: ChainSource::Esplora("https://blockstream.info/testnet/api".to_string()),
+			chain_source: ChainSource::Esplora("https://blockstream.info/api".to_string()),
 			lsp: (lsp.1.parse().unwrap(), lsp.0.parse().unwrap(), None),
 			network: Network::Bitcoin,
 			seed,
