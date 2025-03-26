@@ -480,8 +480,16 @@ continue;
 				}
 			} else {
 				debug_assert_ne!(payment.direction, PaymentDirection::Outbound, "Missing outbound lightning payment metadata entry on {}", payment.id);
+
+				let status = payment.status.into();
+				if status != TxStatus::Completed {
+					// We don't bother to surface pending inbound transactions (i.e. issued but
+					// unpaid invoices) in our transaction list, in part because these may be
+					// failed rebalances.
+					continue;
+				}
 				res.push(Transaction {
-					status: payment.status.into(),
+					status,
 					outbound: payment.direction == PaymentDirection::Outbound,
 					amount: Amount::from_milli_sats(payment.amount_msat.unwrap_or(0)), // TODO: when can this be none https://github.com/lightningdevkit/ldk-node/issues/495
 					fee: Amount::from_milli_sats(0), // TODO: https://github.com/lightningdevkit/ldk-node/issues/494
